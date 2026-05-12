@@ -1,0 +1,8 @@
+[Unit]
+Description=FreePBX Permission Fix
+After=asterisk.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/fix_free_perm.sh
+[Install]
+WantedBy=multi-user.target

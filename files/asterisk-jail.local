@@ -1,0 +1,37 @@
+# FreePBX Fail2ban Configuration with GENEROUS limits
+# Protects against brute force while avoiding false positives from legitimate phones
+
+[asterisk-pjsip]
+enabled = true
+port = 5060,5061
+protocol = udp,tcp
+filter = asterisk-pjsip
+logpath = /var/log/asterisk/full
+          /var/log/asterisk/messages
+
+# GENEROUS LIMITS - Avoids banning legitimate phones with connection issues
+# 20 failed attempts in 10 minutes = ban for 1 hour
+maxretry = 20
+findtime = 600
+bantime = 3600
+
+# Use iptables-multiport for better performance
+banaction = iptables-multiport
+action = %(action_mwl)s
+
+[asterisk-pjsip-ddos]
+enabled = true
+port = 5060,5061
+protocol = udp,tcp
+filter = asterisk-pjsip
+logpath = /var/log/asterisk/full
+          /var/log/asterisk/messages
+
+# Anti-DDoS: More aggressive for obvious flooding attacks
+# 40 failed attempts in 60 seconds = ban for 2 hours
+maxretry = 40
+findtime = 60
+bantime = 7200
+
+banaction = iptables-multiport
+action = %(action_mwl)s

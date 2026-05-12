@@ -1,0 +1,12 @@
+[Unit]
+Description=Asterisk PBX
+After=network.target mariadb.service
+[Service]
+Type=simple
+User=asterisk
+Group=asterisk
+ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

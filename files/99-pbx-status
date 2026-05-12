@@ -1,0 +1,45 @@
+#!/bin/bash
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# System Info
+UPTIME=$(uptime -p | sed 's/up //')
+IP_ADDR=$(hostname -I | cut -d' ' -f1)
+DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}')
+RAM_USAGE=$(free -m | awk 'NR==2 {printf "%.1f%%", $3*100/$2 }')
+
+# Asterisk Version (if running)
+AST_VERSION=$(asterisk -rx "core show version" 2>/dev/null | head -n1 | awk '{print $2}' || echo "N/A")
+
+# Service Status Check
+check_service() {
+    systemctl is-active --quiet $1 2>/dev/null && echo -e "${GREEN}●${NC} ONLINE" || echo -e "${RED}●${NC} OFFLINE"
+}
+
+ASTERISK_STATUS=$(check_service asterisk)
+MARIADB_STATUS=$(check_service mariadb)
+APACHE_STATUS=$(check_service apache2)
+FAIL2BAN_STATUS=$(check_service fail2ban)
+
+# Display Banner
+echo -e "${BLUE}================================================================${NC}"
+echo -e "${BLUE}   ARMBIAN PBX - ASTERISK 22 + FREEPBX 17 (ARM64)${NC}"
+echo -e "${BLUE}================================================================${NC}"
+echo -e ""
+echo -e " ${YELLOW}Web Interface:${NC}  http://$IP_ADDR/admin"
+echo -e " ${YELLOW}System IP:${NC}      $IP_ADDR"
+echo -e " ${YELLOW}Uptime:${NC}         $UPTIME"
+echo -e " ${YELLOW}Disk / RAM:${NC}     $DISK_USAGE / $RAM_USAGE"
+echo -e " ${YELLOW}Asterisk:${NC}       $AST_VERSION"
+echo -e ""
+echo -e " ${YELLOW}Services:${NC}"
+echo -e "   Asterisk PBX:  $ASTERISK_STATUS"
+echo -e "   MariaDB:       $MARIADB_STATUS"
+echo -e "   Apache Web:    $APACHE_STATUS"
+echo -e "   Fail2ban SEC:  $FAIL2BAN_STATUS"
+echo -e ""
+echo -e "${BLUE}================================================================${NC}"
