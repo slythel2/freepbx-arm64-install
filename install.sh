@@ -1,26 +1,25 @@
 #!/bin/bash
 
 # ============================================================================
-# PROJECT:   Armbian PBX Installer (Asterisk 22 + FreePBX 17 + LAMP) v0.6.0
-# TARGET:    Debian 12 Bookworm ARM64
+# PROJECT:   Freepbx 17 for Debian 12 ARM64 Installer (Asterisk 22 + LAMP)
 # LICENSE:   Apache-2.0
-# REPO:      https://github.com/slythel2/FreePBX-17-for-Armbian-12-Bookworm
+# REPO:      https://github.com/slythel2/FreePBX-17-for-Armbian-12-Bookworm-test
 # ============================================================================
 
 set -e
-SCRIPTVER="0.6.0"
+SCRIPTVER="0.7.0"
 
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
 REPO_NAME="FreePBX-17-for-Armbian-12-Bookworm-test"
-REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/main"
+REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/1.0/asterisk-22-current-arm64-debian12-v2.tar.gz"
 
 DB_ROOT_PASS="armbianpbx"
 LOG_FOLDER="/var/log/pbx"
 LOG_FILE="${LOG_FOLDER}/freepbx17-install-$(date '+%Y.%m.%d-%H.%M.%S').log"
 FILES_DIR="/tmp/pbx_installer_files"
-DEBIAN_FRONTEND=noninteractive
+export DEBIAN_FRONTEND=noninteractive
 SANE_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Colors
@@ -56,9 +55,12 @@ errorHandler() {
 }
 
 terminate() {
-	if [ $? -ne 0 ]; then
-		echo_ts "Displaying last 10 lines from the log file"
-		tail -n 10 "$LOG_FILE"
+	local exit_code=$?
+	if [ $exit_code -ne 0 ]; then
+		echo ""
+		echo -e "${RED}>>> Installation failed. Last 10 log entries:${NC}"
+		tail -n 10 "$LOG_FILE" 2>/dev/null || true
+		echo ""
 	fi
 	message "Exiting script"
 }
@@ -115,7 +117,6 @@ setup_logging() {
 	mkdir -p "${LOG_FOLDER}"
 	touch "${LOG_FILE}"
 	exec 2>>"${LOG_FILE}"
-	message "Logging initialized to $LOG_FILE"
 }
 
 download_config_files() {
@@ -149,7 +150,13 @@ system_upgrade() {
 	fi
 
 	setCurrentStep "System upgrade and core dependencies..."
-	apt-get update && apt-get upgrade -y
+	apt-get update >> "$LOG_FILE" 2>&1
+	# upgrade can fail on problematic packages, catch and fix
+	if ! apt-get upgrade -y >> "$LOG_FILE" 2>&1; then
+		warn "apt-get upgrade had errors, attempting fix..."
+		apt-get -y --fix-broken install >> "$LOG_FILE" 2>&1 || true
+		dpkg --configure -a >> "$LOG_FILE" 2>&1 || true
+	fi
 }
 
 install_dependencies() {
@@ -167,6 +174,17 @@ install_dependencies() {
 		unixodbc unixodbc-dev odbcinst libltdl7 libicu-dev \
 		liburiparser1 libjwt-dev liblua5.4-0 libtinfo6 \
 		libsrtp2-1 libportaudio2 nodejs npm fail2ban
+
+	# fallback: install versioned php packages if generic ones didn't create the apache sapi
+	PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
+	if [ ! -f "/etc/php/${PHP_VER}/apache2/php.ini" ]; then
+		message "PHP ${PHP_VER} apache2 SAPI not found, installing version-specific packages..."
+		apt-get install -y "php${PHP_VER}-cli" "php${PHP_VER}-common" "php${PHP_VER}-curl" \
+			"php${PHP_VER}-gd" "php${PHP_VER}-mbstring" "php${PHP_VER}-mysql" \
+			"php${PHP_VER}-soap" "php${PHP_VER}-xml" "php${PHP_VER}-intl" \
+			"php${PHP_VER}-zip" "php${PHP_VER}-bcmath" "php${PHP_VER}-ldap" \
+			"libapache2-mod-php${PHP_VER}" >> "$LOG_FILE" 2>&1 || true
+	fi
 }
 
 # ============================================================================
@@ -176,22 +194,28 @@ install_dependencies() {
 configure_php() {
 	setCurrentStep "Configuring PHP settings"
 
-	for INI in /etc/php/8.2/apache2/php.ini /etc/php/8.2/cli/php.ini; do
+	# detect php version
+	PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
+	message "Detected PHP version: ${PHP_VER}"
+
+	for INI in /etc/php/${PHP_VER}/apache2/php.ini /etc/php/${PHP_VER}/cli/php.ini; do
 		if [ -f "$INI" ]; then
-			# Performance tuning
+			# performance tuning
 			sed -i 's/^memory_limit = .*/memory_limit = 512M/' "$INI"
 			sed -i 's/^upload_max_filesize = .*/upload_max_filesize = 120M/' "$INI"
 			sed -i 's/^post_max_size = .*/post_max_size = 120M/' "$INI"
 			sed -i 's/^;date.timezone =.*/date.timezone = UTC/' "$INI"
-			# OPcache optimization
+			# opcache
 			sed -i 's/^;opcache.enable=.*/opcache.enable=1/' "$INI"
 			sed -i 's/^;opcache.memory_consumption=.*/opcache.memory_consumption=128/' "$INI"
 			sed -i 's/^;opcache.interned_strings_buffer=.*/opcache.interned_strings_buffer=8/' "$INI"
 			sed -i 's/^;opcache.max_accelerated_files=.*/opcache.max_accelerated_files=10000/' "$INI"
-			# MySQL socket paths
+			# mysql socket paths
 			sed -i "s|^;*pdo_mysql.default_socket.*|pdo_mysql.default_socket = /run/mysqld/mysqld.sock|" "$INI"
 			sed -i "s|^;*mysqli.default_socket.*|mysqli.default_socket = /run/mysqld/mysqld.sock|" "$INI"
 			sed -i "s|^;*mysql.default_socket.*|mysql.default_socket = /run/mysqld/mysqld.sock|" "$INI"
+		else
+			warn "PHP ini not found: $INI"
 		fi
 	done
 }
@@ -210,11 +234,16 @@ install_ioncube_loader() {
 			PHP_EXT_DIR="/usr/lib/php/20220829"
 		fi
 
-		if [ -f "ioncube/ioncube_loader_lin_8.2.so" ]; then
-			cp ioncube/ioncube_loader_lin_8.2.so "$PHP_EXT_DIR/"
-			echo "zend_extension = $PHP_EXT_DIR/ioncube_loader_lin_8.2.so" > /etc/php/8.2/mods-available/ioncube.ini
-			ln -sf /etc/php/8.2/mods-available/ioncube.ini /etc/php/8.2/apache2/conf.d/00-ioncube.ini
-			ln -sf /etc/php/8.2/mods-available/ioncube.ini /etc/php/8.2/cli/conf.d/00-ioncube.ini
+		PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
+		# make sure php dirs exist
+		mkdir -p "/etc/php/${PHP_VER}/mods-available"
+		mkdir -p "/etc/php/${PHP_VER}/apache2/conf.d"
+		mkdir -p "/etc/php/${PHP_VER}/cli/conf.d"
+		if [ -f "ioncube/ioncube_loader_lin_${PHP_VER}.so" ]; then
+			cp ioncube/ioncube_loader_lin_${PHP_VER}.so "$PHP_EXT_DIR/"
+			echo "zend_extension = $PHP_EXT_DIR/ioncube_loader_lin_${PHP_VER}.so" > "/etc/php/${PHP_VER}/mods-available/ioncube.ini"
+			ln -sf /etc/php/${PHP_VER}/mods-available/ioncube.ini /etc/php/${PHP_VER}/apache2/conf.d/00-ioncube.ini
+			ln -sf /etc/php/${PHP_VER}/mods-available/ioncube.ini /etc/php/${PHP_VER}/cli/conf.d/00-ioncube.ini
 			log "âœ“ ionCube Loader installed successfully"
 		else
 			warn "ionCube Loader file not found, FreePBX commercial modules may not work"
@@ -374,14 +403,13 @@ configure_odbc() {
 configure_apache() {
 	setCurrentStep "Hardening Apache configuration..."
 
-	# Apache VirtualHost uses ${APACHE_LOG_DIR} which is an Apache variable,
-	# so we use a heredoc here (safest approach) instead of a plain file copy.
+	# vhost config (heredoc to preserve apache env vars)
 	cat > /etc/apache2/sites-available/freepbx.conf <<'APACHEEOF'
 <VirtualHost *:80>
     ServerAdmin webmaster@localhost
     DocumentRoot /var/www/html
 
-    # Automatic redirect from root to /admin
+    # redirect / to /admin
     RewriteEngine On
     RewriteCond %{REQUEST_URI} ^/$
     RewriteRule ^/$ /admin [R=302,L]
@@ -402,7 +430,16 @@ APACHEEOF
 	a2dissite 000-default.conf
 
 	cp "${FILES_DIR}/index.php" /var/www/html/index.php
-	chown asterisk:asterisk /var/www/html/index.php
+
+	# webroot ownership (apache runs as asterisk)
+	chown -R asterisk:asterisk /var/www/html
+
+	# php session dir must be writable by asterisk
+	PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
+	SESSION_DIR="/var/lib/php/sessions"
+	mkdir -p "$SESSION_DIR"
+	chown asterisk:asterisk "$SESSION_DIR"
+	chmod 1733 "$SESSION_DIR"
 
 	systemctl restart apache2
 }
@@ -483,7 +520,7 @@ install_freepbx_modules() {
 	systemctl restart asterisk
 	sleep 5
 
-	# Bulk install all modules in a single command (faster than one-by-one)
+	# bulk install all modules
 	MODULES_LIST="asterisk-cli backup blacklist bulkhandler certman cidlookup \
 		configedit contactmanager customappsreg featurecodeadmin presencestate \
 		qxact_reports recordings soundlang superfecta ucp userman \
@@ -498,11 +535,11 @@ install_freepbx_modules() {
 
 	fwconsole ma downloadinstall $MODULES_LIST &>/dev/null || true
 
-	# Remove firewall module (causes network issues on Armbian - also proprietary)
+	# remove firewall module (causes network issues on armbian)
 	fwconsole ma remove firewall &>/dev/null || true
 
 	log "All modules installed. Reloading FreePBX..."
-	fwconsole reload
+	fwconsole reload || true
 }
 
 # ============================================================================
@@ -772,6 +809,7 @@ main() {
 	export PATH=$SANE_PATH
 	check_root_privileges
 	setup_logging
+	log "Logging initialized to $LOG_FILE"
 
 	# Set error handlers
 	trap 'errorHandler "$LINENO" "$?" "$BASH_COMMAND"' ERR

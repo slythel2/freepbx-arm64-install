@@ -8,7 +8,8 @@ on:
         required: true
         default: '22-current'
   schedule:
-    - cron: '0 0 1 * *'
+    # Runs every 2 months (approx 8-9 weeks) - aligned with Asterisk 22 LTS release cycle
+    - cron: '0 0 1 */2 *'
 
 permissions:
   contents: write
@@ -33,11 +34,53 @@ jobs:
           chmod +x builder_script.sh
           ./builder_script.sh "${{ inputs.asterisk_version || '22-current' }}"
 
+      - name: Extract Asterisk Version
+        id: version
+        run: |
+          # Extract version from the tarball
+          TARBALL=$(ls asterisk-*.tar.gz | head -n1)
+          
+          # Try to extract VERSION.txt from tarball (new method)
+          tar -xzf "$TARBALL" VERSION.txt 2>/dev/null || true
+          
+          if [ -f VERSION.txt ]; then
+            ASTERISK_VERSION=$(cat VERSION.txt)
+            echo ">>> Found VERSION.txt with version: $ASTERISK_VERSION"
+          else
+            # Fallback: try to extract from binary
+            tar -xzf "$TARBALL" -C /tmp usr/sbin/asterisk 2>/dev/null || true
+            if [ -f /tmp/usr/sbin/asterisk ]; then
+              ASTERISK_VERSION=$(/tmp/usr/sbin/asterisk -V 2>/dev/null | grep -oP 'Asterisk \K[0-9.]+' | head -n1 || echo "unknown")
+            else
+              ASTERISK_VERSION="22-current"
+            fi
+          fi
+          
+          echo "version=$ASTERISK_VERSION" >> $GITHUB_OUTPUT
+          echo "tarball=$TARBALL" >> $GITHUB_OUTPUT
+          BUILD_DATE=$(date +"%Y-%m-%d")
+          echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
+
       - name: Upload Release to GitHub
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: build-${{ github.run_number }}
-          name: "Asterisk Native Build #${{ github.run_number }}"
+          tag_name: asterisk-${{ steps.version.outputs.version }}-build${{ github.run_number }}
+          name: "Asterisk 22 LTS ARM64 Build - v${{ steps.version.outputs.version }}"
+          body: |
+            ## Asterisk 22 LTS - ARM64 Debian 12 (Bookworm)
+            
+            **Version:** `${{ steps.version.outputs.version }}`  
+            **Architecture:** ARM64 (aarch64)  
+            **Target OS:** Debian 12 Bookworm  
+            **Build Date:** ${{ steps.version.outputs.build_date }}  
+            **Build Number:** #${{ github.run_number }}
+            
+            ###  Artifact
+            
+            - **File:** `${{ steps.version.outputs.tarball }}`
+            - **Platform:** Native ARM64 build optimized for Armbian/Debian Bookworm
+            
+            For more information, see the [README](https://github.com/${{ github.repository }}/blob/main/README.md).
           files: asterisk-*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

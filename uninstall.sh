@@ -1,15 +1,5 @@
 #!/bin/bash
 
-# FIX CRLF: Auto-correction for Windows line endings
-(set -o igncr) 2>/dev/null && set -o igncr; # Cywin/MinGW workaround
-
-if grep -q $'\r' "$0"; then
-    echo "Windows line endings (CRLF) detected. Fixing..."
-    sed -i 's/\r$//' "$0"
-    echo "File fixed. Restarting script..."
-    exec bash "$0" "$@"
-fi
-
 # ============================================================================
 # SCRIPT: uninstall.sh (v0.2.2)
 # PURPOSE: COMPLETELY remove Asterisk, FreePBX, LAMP stack
@@ -67,10 +57,14 @@ systemctl stop freepbx &> /dev/null
 systemctl stop apache2 &> /dev/null
 systemctl stop mariadb &> /dev/null
 
-# 3. Aggressive Process Kill
+# 3. Aggressive Process Kill - includes all MySQL/MariaDB processes
 killall -9 asterisk &> /dev/null || true
 killall -9 safe_asterisk &> /dev/null || true
+killall -9 mysqld &> /dev/null || true
+killall -9 mariadbd &> /dev/null || true
+killall -9 mysqld_safe &> /dev/null || true
 pkill -u asterisk &> /dev/null || true
+pkill -u mysql &> /dev/null || true
 pm2 kill &> /dev/null || true
 
 echo -e "${YELLOW}[2/9] Removing Systemd Services...${NC}"
@@ -112,31 +106,55 @@ rm -rf /etc/npm
 rm -rf ~/.npm
 
 echo -e "${YELLOW}[6/9] Purging PBX Packages Only (Network-Safe)...${NC}"
-# Only remove PBX-specific packages, not nodejs/npm to preserve system dependencies
+# Detect installed PHP version to purge version-specific packages
+PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "")
+
+# Build the list of PHP packages to purge (generic + version-specific)
+PHP_PURGE_LIST="php php-cli php-common php-curl php-gd php-mbstring php-mysql \
+    php-soap php-xml php-intl php-zip php-bcmath php-ldap php-pear \
+    libapache2-mod-php"
+
+# Add version-specific packages for whatever PHP version is installed
+if [ -n "$PHP_VER" ]; then
+    for mod in cli common curl gd mbstring mysql xml soap intl zip bcmath ldap opcache readline; do
+        PHP_PURGE_LIST="$PHP_PURGE_LIST php${PHP_VER}-${mod}"
+    done
+    PHP_PURGE_LIST="$PHP_PURGE_LIST libapache2-mod-php${PHP_VER}"
+fi
+
 DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq \
     apache2 apache2-bin apache2-data apache2-utils \
     mariadb-server mariadb-client mariadb-common \
-    php-cli php-common php-curl php-gd php-mbstring php-mysql \
-    php-soap php-xml php-intl php-zip php-bcmath php-ldap php-pear \
-    libapache2-mod-php php8.2-cli php8.2-common php8.2-curl \
-    php8.2-gd php8.2-mbstring php8.2-mysql php8.2-xml \
+    $PHP_PURGE_LIST \
     unixodbc unixodbc-dev odbcinst \
     xmlstarlet 2>&1 | grep -v "unable to locate package" || true
 
-echo -e "${YELLOW}[7/8] Cleaning up Package Manager...${NC}"
+# Clean up orphaned dependencies
+apt-get autoremove -y --purge >> /dev/null 2>&1 || true
+
+# Deep purge MariaDB packages to remove ALL config files
+echo -e "${YELLOW}[7/9] Deep cleaning MariaDB packages...${NC}"
+dpkg --purge mariadb-server mariadb-client mariadb-common mysql-common 2>/dev/null || true
+
+# Manually remove dpkg info files for MariaDB (prevents config file conflicts)
+rm -f /var/lib/dpkg/info/mariadb* 2>/dev/null || true
+rm -f /var/lib/dpkg/info/mysql* 2>/dev/null || true
+
+echo -e "${YELLOW}[8/9] Cleaning up Package Manager...${NC}"
 apt-get clean &> /dev/null
 
-echo -e "${YELLOW}[8/8] Final Sweep...${NC}"
-# Clean any residual config directories left by apt purge
-rm -rf /etc/apache2 2>/dev/null || true
-rm -rf /etc/php 2>/dev/null || true
-rm -rf /etc/asterisk 2>/dev/null || true
-rm -rf /etc/mysql 2>/dev/null || true
+echo -e "${YELLOW}[9/9] Final Sweep - Residual files cleanup...${NC}"
+
+rm -rf /var/lib/mysql-files 2>/dev/null || true
+rm -rf /var/lib/mysql-keyring 2>/dev/null || true
+rm -rf /usr/share/mysql 2>/dev/null || true
+rm -f /etc/my.cnf 2>/dev/null || true
+rm -f ~/.my.cnf 2>/dev/null || true
 # Remove Status Banner
 rm -f /etc/update-motd.d/99-pbx-status 2>/dev/null || true
 
 echo -e "${GREEN}========================================================${NC}"
-echo -e "${GREEN}   SYSTEM CLEANED                                       ${NC}"
+echo -e "${GREEN}                    SYSTEM CLEANED                      ${NC}"
 echo -e "${GREEN}========================================================${NC}"
 
 # Post-cleanup verification
@@ -156,19 +174,19 @@ fi
 if systemctl is-active --quiet NetworkManager 2>/dev/null; then
     echo -e "${GREEN}✓ NetworkManager is still running${NC}"
     
-    # Query NetworkManager via D-Bus
-    if nmcli -t -f STATE general 2>/dev/null | grep -q "connected\|connecting"; then
-        echo -e "${GREEN}✓ NetworkManager is responding via D-Bus${NC}"
+    # Query NetworkManager via D-Bus (optional check, may fail temporarily)
+    if nmcli -t -f STATE general 2>/dev/null | grep -q "connected\\|connecting"; then
+        echo -e "${GREEN}✓ NetworkManager D-Bus connection verified${NC}"
     else
-        echo -e "${YELLOW}⚠ NetworkManager running but may have D-Bus issues${NC}"
-        echo "Test with: nmcli device status"
+        echo -e "${YELLOW} NetworkManager D-Bus may need reinitialization${NC}"
+        echo "  This is normal after uninstallation - a reboot will restore full connectivity."
     fi
 else
-    echo -e "${YELLOW}⚠ NetworkManager status unknown${NC}"
+    echo -e "${YELLOW} NetworkManager status unknown${NC}"
     if [ -d "/tmp/nm_backup" ]; then
-        echo "Backup available at: /tmp/nm_backup"
+        echo "  Config backup available at: /tmp/nm_backup"
     fi
 fi
 
 echo ""
-echo "Reboot recommended."
+echo -e "${GREEN}Reboot recommended to complete cleanup.${NC}"
