@@ -28,6 +28,14 @@ fi
 echo ""
 echo -e "${YELLOW}[0/7] safety checks and network fallback...${NC}"
 
+# repair /var/run symlink if damaged (critical for D-Bus and NetworkManager)
+if [ ! -L /var/run ] && [ -d /var/run ]; then
+    rm -rf /var/run 2>/dev/null || true
+    ln -s /run /var/run
+elif [ ! -e /var/run ]; then
+    ln -s /run /var/run
+fi
+
 if ! systemctl is-active --quiet dbus 2>/dev/null; then
     echo -e "${RED}ERROR: D-Bus is not running. Aborting.${NC}"
     exit 1
@@ -181,7 +189,7 @@ rm -rf /etc/asterisk
 rm -rf /var/lib/asterisk
 rm -rf /var/log/asterisk
 rm -rf /var/spool/asterisk
-rm -rf /var/run/asterisk
+rm -rf /run/asterisk
 rm -rf /usr/lib/asterisk
 rm -rf /usr/sbin/asterisk
 rm -rf /home/asterisk
