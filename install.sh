@@ -585,6 +585,10 @@ configure_fail2ban() {
 	cp "${FILES_DIR}/asterisk-pjsip.conf" /etc/fail2ban/filter.d/asterisk-pjsip.conf
 	cp "${FILES_DIR}/asterisk-jail.local" /etc/fail2ban/jail.d/asterisk.local
 
+	# Ensure log files exist so Fail2ban doesn't crash on startup
+	touch /var/log/asterisk/full /var/log/asterisk/messages
+	chown asterisk:asterisk /var/log/asterisk/full /var/log/asterisk/messages
+
 	systemctl enable fail2ban
 	systemctl restart fail2ban
 	sleep 2

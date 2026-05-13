@@ -17,7 +17,6 @@ bantime = 3600
 
 # Use iptables-multiport for better performance
 banaction = iptables-multiport
-action = %(action_mwl)s
 
 [asterisk-pjsip-ddos]
 enabled = true
@@ -34,4 +33,3 @@ findtime = 60
 bantime = 7200
 
 banaction = iptables-multiport
-action = %(action_mwl)s
