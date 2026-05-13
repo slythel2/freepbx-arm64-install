@@ -30,7 +30,8 @@ echo -e "${YELLOW}[0/7] safety checks and network fallback...${NC}"
 
 # repair /var/run symlink if damaged (critical for D-Bus and NetworkManager)
 if [ ! -L /var/run ] && [ -d /var/run ]; then
-    rm -rf /var/run 2>/dev/null || true
+    echo "  -> Fixing broken /var/run directory..."
+    mv /var/run /var/run_broken_$(date +%s) 2>/dev/null || true
     ln -s /run /var/run
 elif [ ! -e /var/run ]; then
     ln -s /run /var/run
@@ -222,6 +223,8 @@ rm -f /etc/update-motd.d/99-pbx-status
 rm -f /etc/tmpfiles.d/mariadb.conf
 rm -f /etc/fail2ban/filter.d/asterisk-pjsip.conf
 rm -f /etc/fail2ban/jail.d/asterisk.local
+rm -rf /etc/systemd/system/NetworkManager.service.d/dbus-fix.conf
+systemctl daemon-reload
 
 echo "  -> Cleaning apt cache..."
 apt-get clean &>/dev/null
