@@ -164,7 +164,7 @@ install_dependencies() {
 
 	apt-get install -y \
 		git curl wget vim htop subversion sox pkg-config sngrep \
-		jq acl haveged dnsutils bind9-dnsutils bind9-host \
+		jq acl haveged isc-dhcp-client dnsutils bind9-dnsutils bind9-host \
 		apache2 mariadb-server mariadb-client odbc-mariadb \
 		php php-cli php-common php-curl php-gd php-mbstring \
 		php-mysql php-soap php-xml php-intl php-zip php-bcmath \
@@ -627,8 +627,6 @@ verify_installation() {
 		message "FreePBX is installed"
 		fwconsole motd 2>/dev/null || true
 	fi
-
-	set -e
 }
 
 cleanup() {
@@ -862,6 +860,8 @@ main() {
 	echo -e "${GREEN}            FREEPBX INSTALLATION COMPLETE!              ${NC}"
 	echo -e "${GREEN}           Access: http://$(hostname -I | cut -d' ' -f1)/admin  ${NC}"
 	echo -e "${GREEN}========================================================${NC}"
+
+	exit 0
 }
 
 # Run main function
