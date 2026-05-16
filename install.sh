@@ -48,19 +48,40 @@ error() {
 }
 
 errorHandler() {
+	local err_line="$1"
+	local err_code="$2"
+	local err_cmd="$3"
+
+	echo ""
+	echo -e "${RED}╔══════════════════════════════════════════════════════════╗${NC}"
+	echo -e "${RED}║              INSTALLATION FAILED — DEBUG INFO            ║${NC}"
+	echo -e "${RED}╠══════════════════════════════════════════════════════════╣${NC}"
+	echo -e "${RED}║ Step:    ${NC}${currentStep}"
+	echo -e "${RED}║ Line:    ${NC}${err_line}"
+	echo -e "${RED}║ Exit:    ${NC}${err_code}"
+	echo -e "${RED}║ Command: ${NC}${err_cmd}"
+	echo -e "${RED}╠══════════════════════════════════════════════════════════╣${NC}"
+	echo -e "${RED}║ Last 20 log entries:${NC}"
+	tail -n 20 "$LOG_FILE" 2>/dev/null | while IFS= read -r line; do
+		echo -e "${RED}║${NC}  $line"
+	done
+	echo -e "${RED}╠══════════════════════════════════════════════════════════╣${NC}"
+	echo -e "${RED}║ Full log: ${NC}${LOG_FILE}"
+	echo -e "${RED}╚══════════════════════════════════════════════════════════╝${NC}"
+	echo ""
+
 	log "****** INSTALLATION FAILED *****"
-	echo_ts "Installation failed at step ${currentStep}. Please check log ${LOG_FILE} for details."
-	log "Error at line: $1 exiting with code $2 (last command was: $3)"
-	exit "$2"
+	log "Step: ${currentStep}"
+	log "Error at line: $err_line exiting with code $err_code (last command was: $err_cmd)"
+
+	exit "$err_code"
 }
 
 terminate() {
 	local exit_code=$?
 	if [ $exit_code -ne 0 ]; then
-		echo ""
-		echo -e "${RED}>>> Installation failed. Last 10 log entries:${NC}"
-		tail -n 10 "$LOG_FILE" 2>/dev/null || true
-		echo ""
+		# errorHandler already printed debug info, just log the exit
+		log "Script terminated with exit code $exit_code"
 	fi
 	message "Exiting script"
 }
@@ -172,7 +193,7 @@ install_dependencies() {
 		libxml2 libsqlite3-0 libjansson4 libedit2 libxslt1.1 \
 		libopus0 libvorbis0a libspeex1 libspeexdsp1 libgsm1 \
 		unixodbc unixodbc-dev odbcinst libltdl7 libicu-dev \
-		libsrtp2-1 libportaudio2 nodejs npm fail2ban
+		libsrtp2-1 libportaudio2 liburiparser1 nodejs npm fail2ban
 
 	# install pm2 globally (required by newer FreePBX 17 modules)
 	npm install -g pm2 >> "$LOG_FILE" 2>&1 || true
@@ -491,9 +512,21 @@ verify_dns() {
 install_freepbx() {
 	setCurrentStep "Installing FreePBX 17..."
 	cd /usr/src
-	wget -q http://mirror.freepbx.org/modules/packages/freepbx/freepbx-17.0-latest.tgz
+
+	# Remove old tarball/directory if re-running
+	rm -f freepbx-17.0-latest.tgz 2>/dev/null || true
+	rm -rf freepbx 2>/dev/null || true
+
+	log "Downloading FreePBX 17 tarball..."
+	if ! wget -q http://mirror.freepbx.org/modules/packages/freepbx/freepbx-17.0-latest.tgz; then
+		error "Failed to download FreePBX tarball from mirror.freepbx.org"
+	fi
+	log "FreePBX tarball downloaded successfully."
+
+	log "Extracting FreePBX tarball..."
 	tar xfz freepbx-17.0-latest.tgz
 	cd freepbx
+	log "FreePBX extracted and ready."
 
 	log "Verifying MySQL connection..."
 	if ! mysql -u asterisk -p"$DB_ROOT_PASS" -e "SELECT 1;" &> /dev/null; then
