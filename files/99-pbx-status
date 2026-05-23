@@ -3,14 +3,47 @@
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+ORANGE='\033[38;5;214m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
 # System Info
 UPTIME=$(uptime -p | sed 's/up //')
 IP_ADDR=$(hostname -I | cut -d' ' -f1)
+
+# Disk Calculation
 DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}')
-RAM_USAGE=$(free -m | awk 'NR==2 {printf "%.1f%%", $3*100/$2 }')
+DISK_USED_VAL=$(df -h / | awk 'NR==2 {print $3}' | sed 's/i//g; s/M/MB/g')
+DISK_TOTAL_VAL=$(df -h / | awk 'NR==2 {print $2}' | sed 's/i//g; s/M/MB/g')
+DISK_PERCENT_NUM=${DISK_USAGE%\%}
+
+if [ "$DISK_PERCENT_NUM" -ge 90 ]; then
+    DISK_COLOR=$RED
+elif [ "$DISK_PERCENT_NUM" -ge 70 ]; then
+    DISK_COLOR=$ORANGE
+else
+    DISK_COLOR=$GREEN
+fi
+DISK_STR="${DISK_COLOR}${DISK_USAGE}${NC} (${DISK_USED_VAL}/${DISK_TOTAL_VAL})"
+
+# RAM Calculation
+RAM_INFO=$(free -m | awk 'NR==2 {print $2, $3}')
+RAM_TOTAL=$(echo "$RAM_INFO" | awk '{print $1}')
+RAM_USED=$(echo "$RAM_INFO" | awk '{print $2}')
+RAM_TOTAL_H=$(free -h | awk 'NR==2 {print $2}' | sed 's/i//g; s/M/MB/g')
+RAM_USED_H=$(free -h | awk 'NR==2 {print $3}' | sed 's/i//g; s/M/MB/g')
+
+RAM_PERCENT_DEC=$(awk "BEGIN {printf \"%.1f\", $RAM_USED*100/$RAM_TOTAL}")
+RAM_PERCENT_INT=$(awk "BEGIN {printf \"%.0f\", $RAM_USED*100/$RAM_TOTAL}")
+
+if [ "$RAM_PERCENT_INT" -ge 90 ]; then
+    RAM_COLOR=$RED
+elif [ "$RAM_PERCENT_INT" -ge 70 ]; then
+    RAM_COLOR=$ORANGE
+else
+    RAM_COLOR=$GREEN
+fi
+RAM_STR="${RAM_COLOR}${RAM_PERCENT_DEC}%${NC} (${RAM_USED_H}/${RAM_TOTAL_H})"
 
 # Asterisk Version (if running)
 AST_VERSION=$(asterisk -rx "core show version" 2>/dev/null | head -n1 | awk '{print $2}' || echo "N/A")
@@ -25,21 +58,30 @@ MARIADB_STATUS=$(check_service mariadb)
 APACHE_STATUS=$(check_service apache2)
 FAIL2BAN_STATUS=$(check_service fail2ban)
 
+# Banned Local IPs Check
+LOCAL_BANNED=$(fail2ban-client banned 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -E '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)' | sort -u | paste -sd ',' - | sed 's/,/, /g')
+if [ -z "$LOCAL_BANNED" ]; then
+    BANNED_STR="${GREEN}None${NC}"
+else
+    BANNED_STR="${RED}${LOCAL_BANNED}${NC}"
+fi
+
 # Display Banner
-echo -e "${BLUE}================================================================${NC}"
-echo -e "${BLUE}   ARMBIAN PBX - ASTERISK 22 + FREEPBX 17 (ARM64)${NC}"
-echo -e "${BLUE}================================================================${NC}"
+echo -e "${BLUE}=========================================================${NC}"
+echo -e "${BLUE}                   FREEPBX 17 ARM64 ${NC}"
+echo -e "${BLUE}=========================================================${NC}"
 echo -e ""
 echo -e " ${YELLOW}Web Interface:${NC}  http://$IP_ADDR/admin"
-echo -e " ${YELLOW}System IP:${NC}      $IP_ADDR"
 echo -e " ${YELLOW}Uptime:${NC}         $UPTIME"
-echo -e " ${YELLOW}Disk / RAM:${NC}     $DISK_USAGE / $RAM_USAGE"
+echo -e " ${YELLOW}Disk / RAM:${NC}     $DISK_STR - $RAM_STR"
 echo -e " ${YELLOW}Asterisk:${NC}       $AST_VERSION"
 echo -e ""
-echo -e " ${YELLOW}Services:${NC}"
-echo -e "   Asterisk PBX:  $ASTERISK_STATUS"
-echo -e "   MariaDB:       $MARIADB_STATUS"
-echo -e "   Apache Web:    $APACHE_STATUS"
-echo -e "   Fail2ban SEC:  $FAIL2BAN_STATUS"
+echo -e " ${YELLOW}Services & Info:${NC}"
+echo -e "   Asterisk:         $ASTERISK_STATUS"
+echo -e "   MariaDB:          $MARIADB_STATUS"
+echo -e "   Apache Web:       $APACHE_STATUS"
+echo -e "   Fail2ban SEC:     $FAIL2BAN_STATUS"
+echo -e "   Banned Local IPs: $BANNED_STR"
 echo -e ""
-echo -e "${BLUE}================================================================${NC}"
+echo -e " ${YELLOW}Remember to run update_asterisk.sh to update your Asterisk 22 version!${NC}"
+echo -e "${BLUE}=========================================================${NC}"

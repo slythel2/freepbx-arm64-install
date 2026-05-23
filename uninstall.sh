@@ -219,11 +219,19 @@ rm -rf /usr/share/mysql 2>/dev/null || true
 echo "  -> Removing installer artifacts..."
 rm -rf /tmp/pbx_installer_files
 rm -rf /var/log/pbx
+rm -f /usr/local/bin/update_asterisk.sh
+rm -f /var/lock/asterisk_update.lock
+rm -rf /var/backups/asterisk
+rm -rf /etc/dahdi
+rm -f /etc/modprobe.d/dahdi.conf
 rm -f /etc/update-motd.d/99-pbx-status
 rm -f /etc/tmpfiles.d/mariadb.conf
 rm -f /etc/fail2ban/filter.d/asterisk-pjsip.conf
 rm -f /etc/fail2ban/jail.d/asterisk.local
+rm -f /etc/fail2ban/jail.d/sshd.local
 rm -rf /etc/systemd/system/NetworkManager.service.d/dbus-fix.conf
+rm -f /etc/apt/preferences.d/99-block-trixie.pref
+rm -f /var/run/freepbx_installer.pid
 systemctl daemon-reload
 
 echo "  -> Cleaning apt cache..."

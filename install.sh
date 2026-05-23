@@ -20,7 +20,9 @@ LOG_FOLDER="/var/log/pbx"
 LOG_FILE="${LOG_FOLDER}/freepbx17-install-$(date '+%Y.%m.%d-%H.%M.%S').log"
 FILES_DIR="/tmp/pbx_installer_files"
 export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 SANE_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PIDFILE="/var/run/freepbx_installer.pid"
 
 # Colors
 RED='\033[0;31m'
@@ -31,6 +33,33 @@ NC='\033[0m'
 
 # Global state
 currentStep=""
+
+# CLI flags (defaults)
+skipversion=false
+nochrony=false
+
+# --- ARGUMENT PARSING ---
+while [[ $# -gt 0 ]]; do
+	case $1 in
+		--skipversion)
+			skipversion=true
+			shift
+			;;
+		--nochrony)
+			nochrony=true
+			shift
+			;;
+		-*)
+			echo "Unknown option: $1"
+			echo "Usage: $0 [--skipversion] [--nochrony]"
+			exit 1
+			;;
+		*)
+			echo "Unknown argument: $1"
+			exit 1
+			;;
+	esac
+done
 
 # ============================================================================
 # LOGGING & ERROR HANDLING
@@ -84,6 +113,78 @@ terminate() {
 		log "Script terminated with exit code $exit_code"
 	fi
 	message "Exiting script"
+}
+
+# ============================================================================
+# SELF-VERSION CHECK
+# ============================================================================
+
+check_script_version() {
+	if [ "$skipversion" = true ]; then
+		log "Skipping version check (--skipversion flag set)"
+		return
+	fi
+
+	setCurrentStep "Checking for newer installer version on GitHub..."
+	local remote_script="/tmp/install_latest_check.sh"
+
+	if ! wget -q -T 10 "${REPO_RAW}/install.sh" -O "$remote_script" 2>/dev/null; then
+		warn "Could not check for updates (network issue). Continuing with current version."
+		return
+	fi
+
+	local latest_ver
+	latest_ver=$(grep '^SCRIPTVER=' "$remote_script" | head -1 | cut -d'"' -f2)
+	rm -f "$remote_script"
+
+	if [ -z "$latest_ver" ]; then
+		warn "Could not parse remote version. Continuing."
+		return
+	fi
+
+	if dpkg --compare-versions "$latest_ver" gt "$SCRIPTVER" 2>/dev/null; then
+		echo ""
+		echo -e "${YELLOW}╔══════════════════════════════════════════════════════════╗${NC}"
+		echo -e "${YELLOW}║  A newer version ($latest_ver) is available on GitHub.      ║${NC}"
+		echo -e "${YELLOW}║  You are running version $SCRIPTVER.                        ║${NC}"
+		echo -e "${YELLOW}║  Use --skipversion to bypass this check.                 ║${NC}"
+		echo -e "${YELLOW}╚══════════════════════════════════════════════════════════╝${NC}"
+		echo ""
+		echo -n "Continue anyway? [y/N]: "
+		read -r answer
+		if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+			echo "Aborting. Download the latest version from:"
+			echo "  https://github.com/${REPO_OWNER}/${REPO_NAME}"
+			exit 0
+		fi
+	else
+		log "Installer is up to date (v${SCRIPTVER})."
+	fi
+}
+
+# ============================================================================
+# TRIXIE UPGRADE PROTECTION
+# ============================================================================
+
+block_trixie_upgrade() {
+	setCurrentStep "Blocking accidental Debian 13 (Trixie) upgrade..."
+
+	# Pin trixie packages to priority -1 so they are never installed
+	cat >/etc/apt/preferences.d/99-block-trixie.pref <<'EOF'
+# Block Debian 13 Trixie — FreePBX 17 only supports Debian 12 Bookworm
+Package: *
+Pin: release n=trixie
+Pin-Priority: -1
+
+EOF
+
+	# If sources.list uses "stable" instead of "bookworm", fix it
+	if grep -qE 'deb\s+.*\s+stable\b' /etc/apt/sources.list 2>/dev/null; then
+		sed -i.bak -E 's|(deb\s+.*\s+)stable\b|\1bookworm|g' /etc/apt/sources.list
+		message "Fixed sources.list: replaced 'stable' with 'bookworm'"
+	fi
+
+	log "Trixie upgrade protection enabled."
 }
 
 # ============================================================================
@@ -183,6 +284,10 @@ system_upgrade() {
 install_dependencies() {
 	setCurrentStep "Installing required packages"
 
+	# pre-configure postfix to avoid interactive prompts during installation
+	debconf-set-selections <<< "postfix postfix/mailname string $(hostname -f)"
+	debconf-set-selections <<< "postfix postfix/main_mailer_type string 'Internet Site'"
+
 	apt-get install -y \
 		git curl wget vim htop subversion sox pkg-config sngrep \
 		jq acl haveged isc-dhcp-client dnsutils bind9-dnsutils bind9-host \
@@ -193,7 +298,16 @@ install_dependencies() {
 		libxml2 libsqlite3-0 libjansson4 libedit2 libxslt1.1 \
 		libopus0 libvorbis0a libspeex1 libspeexdsp1 libgsm1 \
 		unixodbc unixodbc-dev odbcinst libltdl7 libicu-dev \
-		libsrtp2-1 libportaudio2 liburiparser1 nodejs npm fail2ban
+		libsrtp2-1 libportaudio2 liburiparser1 nodejs npm fail2ban python3-systemd \
+		ffmpeg lame mpg123 postfix
+
+	# install chrony for time sync (skip with --nochrony)
+	if [ "$nochrony" = false ]; then
+		log "Installing chrony for NTP time synchronization..."
+		apt-get install -y chrony >> "$LOG_FILE" 2>&1 || warn "Failed to install chrony."
+	else
+		log "Skipping chrony installation (--nochrony flag set)."
+	fi
 
 	# install pm2 globally (required by newer FreePBX 17 modules)
 	npm install -g pm2 >> "$LOG_FILE" 2>&1 || true
@@ -280,10 +394,17 @@ install_ioncube_loader() {
 }
 
 configure_networkmanager() {
-	log "Configuring NetworkManager systemd override..."
-	mkdir -p /etc/systemd/system/NetworkManager.service.d
-	cp "${FILES_DIR}/dbus-fix.conf" /etc/systemd/system/NetworkManager.service.d/dbus-fix.conf
-	systemctl daemon-reload
+	# Only apply the dbus-fix override if NetworkManager is actually installed
+	# (Armbian uses NM, most VPS images use systemd-networkd instead)
+	if systemctl list-unit-files NetworkManager.service &>/dev/null && \
+	   systemctl list-unit-files NetworkManager.service | grep -q NetworkManager; then
+		log "NetworkManager detected — applying dbus-fix override..."
+		mkdir -p /etc/systemd/system/NetworkManager.service.d
+		cp "${FILES_DIR}/dbus-fix.conf" /etc/systemd/system/NetworkManager.service.d/dbus-fix.conf
+		systemctl daemon-reload
+	else
+		log "NetworkManager not found (VPS/cloud image) — skipping dbus-fix override."
+	fi
 }
 
 # ============================================================================
@@ -452,6 +573,11 @@ APACHEEOF
 	a2ensite freepbx.conf
 	a2dissite 000-default.conf
 
+	# harden Apache — hide version info from attackers
+	sed -i 's/^ServerTokens .*/ServerTokens Prod/' /etc/apache2/conf-available/security.conf 2>/dev/null || true
+	sed -i 's/^ServerSignature .*/ServerSignature Off/' /etc/apache2/conf-available/security.conf 2>/dev/null || true
+	a2enconf security 2>/dev/null || true
+
 	cp "${FILES_DIR}/index.php" /var/www/html/index.php
 
 	# webroot ownership (apache runs as asterisk)
@@ -587,7 +713,7 @@ install_freepbx_modules() {
 		callwaiting conferences dictate directory disa donotdisturb findmefollow \
 		infoservices ivr languages miscapps miscdests paging parking queueprio \
 		queues ringgroups setcid timeconditions tts vmblast wakeup \
-		dahdiconfig api sms webrtc dashboard \
+		api sms webrtc dashboard dahdiconfig \
 		asterisklogfiles cdr cel phpinfo printextensions weakpasswords \
 		asteriskapi arimanager fax filestore iaxsettings musiconhold pinsets \
 		sipsettings ttsengines voicemail pm2"
@@ -602,7 +728,27 @@ install_freepbx_modules() {
 	# remove firewall module (causes network issues on armbian)
 	log "Removing problematic firewall module..."
 	fwconsole ma remove firewall &>/dev/null || true
+
+	# create DAHDI stub config files — the dahdiconfig module checks for these
+	# and throws Critical Errors on the dashboard if they're missing.
+	# On systems without physical telephony hardware (TV boxes, VPS) these files
+	# won't exist naturally. Empty stubs silence the warnings while keeping the
+	# module ready for use if DAHDI hardware is added later.
+	log "Creating DAHDI stub config files..."
+	mkdir -p /etc/dahdi
+	[ -f /etc/dahdi/modules ]     || echo "# DAHDI modules — configure if telephony hardware is installed" > /etc/dahdi/modules
+	[ -f /etc/dahdi/system.conf ] || echo "# DAHDI system config — configure if telephony hardware is installed" > /etc/dahdi/system.conf
+	[ -f /etc/modprobe.d/dahdi.conf ] || echo "# DAHDI modprobe options — configure if telephony hardware is installed" > /etc/modprobe.d/dahdi.conf
+	chown -R asterisk:asterisk /etc/dahdi
+
 	log "Module installation phase finished."
+
+	# fix permissions AFTER module install — module install.php scripts run as
+	# root and create config files (e.g. http_custom.conf) owned by root:root.
+	# Without this, the web GUI (running as asterisk) gets Permission denied
+	# when trying to update those files later.
+	log "Fixing permissions after module installation..."
+	fwconsole chown
 
 	log "All modules installed. Reloading FreePBX..."
 	fwconsole reload || true
@@ -617,6 +763,10 @@ configure_fail2ban() {
 
 	cp "${FILES_DIR}/asterisk-pjsip.conf" /etc/fail2ban/filter.d/asterisk-pjsip.conf
 	cp "${FILES_DIR}/asterisk-jail.local" /etc/fail2ban/jail.d/asterisk.local
+
+	# Fix for Debian 12: rsyslog is not installed by default, so /var/log/auth.log doesn't exist.
+	# We must instruct the default sshd jail to use the systemd backend instead.
+	echo -e "[sshd]\nbackend = systemd" > /etc/fail2ban/jail.d/sshd.local
 
 	# Ensure log files exist so Fail2ban doesn't crash on startup
 	touch /var/log/asterisk/full /var/log/asterisk/messages
@@ -664,6 +814,15 @@ create_system_banner() {
 	rm -f /etc/motd 2>/dev/null
 }
 
+install_updater_script() {
+	setCurrentStep "Installing Asterisk update script..."
+	if wget -q "${REPO_RAW}/update_asterisk.sh" -O /usr/local/bin/update_asterisk.sh; then
+		chmod +x /usr/local/bin/update_asterisk.sh
+	else
+		warn "Failed to download update_asterisk.sh"
+	fi
+}
+
 # ============================================================================
 # POST-INSTALLATION VALIDATION
 # ============================================================================
@@ -677,7 +836,7 @@ check_services() {
 		if [[ "$service_status" != "active" ]]; then
 			warn "Service $service is not active."
 		else
-			log "âœ“ Service $service is active"
+			log "✓ Service $service is active"
 		fi
 	done
 }
@@ -707,191 +866,42 @@ cleanup() {
 }
 
 # ============================================================================
-# UPDATER (--update flag)
-# ============================================================================
-
-run_asterisk_updater() {
-	log "Starting Asterisk 22 Robust Update with Rollback Protection..."
-
-	# Backup
-	BACKUP_DIR="/tmp/asterisk_backup_$(date +%s)"
-	mkdir -p "$BACKUP_DIR"
-
-	log "Creating backup of current Asterisk installation..."
-	if [ -f /usr/sbin/asterisk ]; then
-		cp /usr/sbin/asterisk "$BACKUP_DIR/" || error "Failed to backup binary"
-	fi
-	if [ -d /usr/lib/asterisk/modules ]; then
-		mkdir -p "$BACKUP_DIR/modules"
-		cp -r /usr/lib/asterisk/modules/* "$BACKUP_DIR/modules/" 2>/dev/null || true
-	fi
-	log "Backup created at: $BACKUP_DIR"
-
-	# Environment verification
-	log "Verifying Asterisk environment..."
-	mkdir -p /var/run/asterisk /var/log/asterisk /var/lib/asterisk /var/spool/asterisk /etc/asterisk /usr/lib/asterisk/modules
-
-	if [ ! -f /etc/asterisk/asterisk.conf ]; then
-		warn "asterisk.conf missing, recreating..."
-		download_config_files
-		cp "${FILES_DIR}/asterisk.conf" /etc/asterisk/asterisk.conf
-	fi
-
-	# Stop Asterisk
-	log "Stopping Asterisk..."
-	systemctl stop asterisk
-	sleep 2
-	pkill -9 asterisk 2>/dev/null || true
-	sleep 1
-
-	# Download update
-	if ! command -v jq &> /dev/null; then
-		apt-get update && apt-get install -y jq
-	fi
-
-	log "Fetching latest Asterisk 22 release from GitHub..."
-	LATEST_URL=$(curl -s "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" \
-		| jq -r '.assets[] | select(.name | contains("asterisk")) | .browser_download_url' | head -n 1)
-
-	if [ -z "$LATEST_URL" ]; then
-		warn "Could not fetch latest release, using fallback URL."
-		ASTERISK_ARTIFACT_URL="$FALLBACK_ARTIFACT"
-	else
-		log "Latest release found: $LATEST_URL"
-		ASTERISK_ARTIFACT_URL="$LATEST_URL"
-	fi
-
-	STAGE_DIR="/tmp/asterisk_update_stage"
-	rm -rf "$STAGE_DIR" && mkdir -p "$STAGE_DIR"
-
-	DOWNLOAD_SUCCESS=0
-	for attempt in {1..3}; do
-		if wget --show-progress -O /tmp/asterisk_update.tar.gz "$ASTERISK_ARTIFACT_URL"; then
-			if tar -tzf /tmp/asterisk_update.tar.gz > /dev/null 2>&1; then
-				DOWNLOAD_SUCCESS=1
-				log "Update artifact downloaded and verified."
-				break
-			else
-				warn "Downloaded file corrupted. Attempt $attempt/3"
-				rm -f /tmp/asterisk_update.tar.gz
-			fi
-		else
-			warn "Download failed. Attempt $attempt/3"
-			rm -f /tmp/asterisk_update.tar.gz
-		fi
-		sleep 2
-	done
-
-	if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
-		rm -rf "$BACKUP_DIR"
-		error "Failed to download update after 3 attempts."
-	fi
-
-	# Deploy update
-	log "Extracting update..."
-	tar -xzf /tmp/asterisk_update.tar.gz -C "$STAGE_DIR"
-
-	log "Deploying updated binaries and modules..."
-	[ -d "$STAGE_DIR/usr/sbin" ] && cp -f "$STAGE_DIR/usr/sbin/asterisk" /usr/sbin/
-	[ -d "$STAGE_DIR/usr/lib/asterisk/modules" ] && cp -rf "$STAGE_DIR/usr/lib/asterisk/modules"/* /usr/lib/asterisk/modules/
-
-	# Restore permissions
-	log "Restoring correct permissions..."
-	chown asterisk:asterisk /usr/sbin/asterisk
-	chmod +x /usr/sbin/asterisk
-	chown -R asterisk:asterisk /usr/lib/asterisk/modules
-	chown -R asterisk:asterisk /var/run/asterisk /var/log/asterisk /var/lib/asterisk /var/spool/asterisk /etc/asterisk
-
-	rm -rf "$STAGE_DIR" /tmp/asterisk_update.tar.gz
-	ldconfig
-
-	# Health check
-	log "Starting Asterisk and performing health check..."
-	systemctl start asterisk
-	sleep 5
-
-	ASTERISK_HEALTHY=0
-	for i in {1..10}; do
-		if asterisk -rx "core show version" &>/dev/null; then
-			ASTERISK_HEALTHY=1
-			log "âœ“ Asterisk is responding to CLI - Update successful!"
-			break
-		fi
-		warn "Waiting for Asterisk to respond... ($i/10)"
-		sleep 2
-	done
-
-	if [ $ASTERISK_HEALTHY -eq 0 ]; then
-		# ROLLBACK
-		error_msg="Asterisk failed to start. Rolling back..."
-		echo -e "${RED}[ERROR] ${error_msg}${NC}" | tee -a "$LOG_FILE"
-		systemctl stop asterisk
-		pkill -9 asterisk 2>/dev/null || true
-
-		if [ -f "$BACKUP_DIR/asterisk" ]; then
-			cp -f "$BACKUP_DIR/asterisk" /usr/sbin/asterisk
-			chown asterisk:asterisk /usr/sbin/asterisk
-			chmod +x /usr/sbin/asterisk
-		fi
-		if [ -d "$BACKUP_DIR/modules" ]; then
-			rm -rf /usr/lib/asterisk/modules/*
-			cp -r "$BACKUP_DIR/modules"/* /usr/lib/asterisk/modules/
-			chown -R asterisk:asterisk /usr/lib/asterisk/modules
-		fi
-
-		ldconfig
-		systemctl start asterisk
-		sleep 3
-		rm -rf "$BACKUP_DIR"
-		error "Rollback complete. Previous version restored. Check: journalctl -xeu asterisk"
-	fi
-
-	# Final validation
-	log "Running FreePBX reload..."
-	if command -v fwconsole &> /dev/null; then
-		fwconsole reload || warn "FreePBX reload had warnings"
-	fi
-
-	rm -rf "$BACKUP_DIR"
-
-	ASTERISK_VERSION=$(asterisk -rx "core show version" 2>/dev/null | head -n1 | awk '{print $2}' || echo "Unknown")
-	echo -e "${GREEN}========================================================${NC}"
-	echo -e "${GREEN}     ASTERISK UPDATE COMPLETED SUCCESSFULLY!           ${NC}"
-	echo -e "${GREEN}            Version: $ASTERISK_VERSION                 ${NC}"
-	echo -e "${GREEN}========================================================${NC}"
-	exit 0
-}
-
-# ============================================================================
 # MAIN EXECUTION
 # ============================================================================
 
 main() {
-	# Handle updater mode
-	if [[ "$1" == "--update" ]]; then
-		run_asterisk_updater
-		exit 0
-	fi
-
 	# Setup
 	export PATH=$SANE_PATH
 	check_root_privileges
 	setup_logging
 	log "Logging initialized to $LOG_FILE"
 
+	# Prevent parallel executions
+	if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+		echo "Another instance of the installer is already running (PID $(cat "$PIDFILE"))."
+		echo "If this is incorrect, remove $PIDFILE and try again."
+		exit 1
+	fi
+	echo $$ > "$PIDFILE"
+
 	# Set error handlers
 	trap 'errorHandler "$LINENO" "$?" "$BASH_COMMAND"' ERR
-	trap "terminate" EXIT
+	trap 'rm -f "$PIDFILE"; terminate' EXIT
 
 	start=$(date +%s)
 
 	clear
 	echo "========================================================"
 	echo "   ARMBIAN 12 FREEPBX 17 INSTALLER (Asterisk 22 LTS)  "
+	echo "   Version: $SCRIPTVER"
 	echo "========================================================"
 
-	# Main installation flow
+	# Pre-flight checks
 	check_architecture
+	check_script_version
+	block_trixie_upgrade
+
+	# Main installation flow
 	download_config_files
 	system_upgrade
 	install_dependencies
@@ -919,6 +929,7 @@ main() {
 	configure_fail2ban
 	create_persistence_service
 	create_system_banner
+	install_updater_script
 
 	verify_installation
 	cleanup
