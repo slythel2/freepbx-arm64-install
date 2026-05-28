@@ -63,14 +63,21 @@ echo ">>> [BUILDER] Configuring..."
     --without-x11 \
     --without-gtk2
 
-# Extract actual Asterisk version from configure output
-# config.log contains both "#define PACKAGE_VERSION" (C macro) and "PACKAGE_VERSION='x.y.z'" (shell var).
-# We must match only the shell variable form to get the full semver (e.g., 22.9.0).
-REAL_VERSION=$(grep "^PACKAGE_VERSION='" config.log | head -n1 | cut -d"'" -f2 || echo "")
-if [ -z "$REAL_VERSION" ]; then
-    # Fallback: try makeopts which also has the version
-    REAL_VERSION=$(grep "^ASTERISK_VERSION=" makeopts 2>/dev/null | cut -d'=' -f2 || echo "unknown")
+# Extract actual Asterisk version
+# Priority: .version file (most reliable, contains full semver like 22.9.0)
+#         → include/asterisk/version.h (generated after configure)
+#         → config.log PACKAGE_VERSION (may only contain major version)
+if [ -f ".version" ]; then
+    REAL_VERSION=$(cat .version | tr -d '[:space:]')
+    echo ">>> [BUILDER] Version from .version file: $REAL_VERSION"
+elif [ -f "include/asterisk/version.h" ]; then
+    REAL_VERSION=$(grep 'ASTERISK_VERSION' include/asterisk/version.h | grep -oP '"[^"]*"' | tr -d '"' | head -n1)
+    echo ">>> [BUILDER] Version from version.h: $REAL_VERSION"
+else
+    REAL_VERSION=$(grep "^PACKAGE_VERSION='" config.log | head -n1 | cut -d"'" -f2 || echo "")
+    echo ">>> [BUILDER] Version from config.log: $REAL_VERSION"
 fi
+[ -z "$REAL_VERSION" ] && REAL_VERSION="unknown"
 echo ">>> [BUILDER] Detected Asterisk version: $REAL_VERSION"
 echo "$REAL_VERSION" > /tmp/asterisk_version.txt
 
