@@ -91,6 +91,11 @@ else
 
 	# Compare versions if possible
 	AVAILABLE_VERSION=$(echo "$RELEASE_TAG" | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+	# Fallback: parse version from release body if tag doesn't contain semver
+	if [ -z "$AVAILABLE_VERSION" ]; then
+		AVAILABLE_VERSION=$(echo "$RELEASE_JSON" | jq -r '.body // ""' | grep -oP 'Version.*?`\K[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+		[ -n "$AVAILABLE_VERSION" ] && log "Parsed version from release body: $AVAILABLE_VERSION"
+	fi
 	if [ -n "$AVAILABLE_VERSION" ] && [ "$CURRENT_VERSION" != "unknown" ]; then
 		if [ "$CURRENT_VERSION" = "$AVAILABLE_VERSION" ]; then
 			echo -e "${GREEN}Asterisk is already at version ${CURRENT_VERSION}. No update needed.${NC}"
@@ -219,6 +224,21 @@ fi
 
 message "Deploying updated binaries, modules, and libraries..."
 tar -xzf /tmp/asterisk_update.tar.gz -C "$STAGE_DIR"
+
+# Extract confirmed version from tarball's VERSION.txt
+if [ -f "$STAGE_DIR/VERSION.txt" ]; then
+	TARBALL_VERSION=$(cat "$STAGE_DIR/VERSION.txt" | tr -d '[:space:]')
+	message "Tarball contains Asterisk version: $TARBALL_VERSION"
+	# Update AVAILABLE_VERSION if we got a better answer from the tarball
+	if echo "$TARBALL_VERSION" | grep -qP '^[0-9]+\.[0-9]+\.[0-9]+'; then
+		AVAILABLE_VERSION="$TARBALL_VERSION"
+	fi
+fi
+
+# SAFETY: The tarball also contains sample configs (/etc/asterisk/) and data
+# files (/var/lib/asterisk/) from `make samples` and `make install`, but we
+# intentionally ONLY deploy binary + modules + libraries below.
+# User configurations in /etc/asterisk/ and FreePBX data MUST NOT be overwritten.
 
 # Binary
 [ -f "$STAGE_DIR/usr/sbin/asterisk" ] && cp -f "$STAGE_DIR/usr/sbin/asterisk" /usr/sbin/

@@ -40,19 +40,24 @@ jobs:
           # Extract version from the tarball
           TARBALL=$(ls asterisk-*.tar.gz | head -n1)
           
-          # Try to extract VERSION.txt from tarball (new method)
-          tar -xzf "$TARBALL" VERSION.txt 2>/dev/null || true
+          # Try to extract VERSION.txt from tarball
+          # Note: tarball is created with `tar ... .` so paths start with ./
+          tar -xzf "$TARBALL" ./VERSION.txt 2>/dev/null || true
           
           if [ -f VERSION.txt ]; then
-            ASTERISK_VERSION=$(cat VERSION.txt)
+            ASTERISK_VERSION=$(cat VERSION.txt | tr -d '[:space:]')
             echo ">>> Found VERSION.txt with version: $ASTERISK_VERSION"
           else
-            # Fallback: try to extract from binary
-            tar -xzf "$TARBALL" -C /tmp usr/sbin/asterisk 2>/dev/null || true
+            # Fallback: try to extract and run the binary
+            tar -xzf "$TARBALL" -C /tmp ./usr/sbin/asterisk 2>/dev/null || true
+            tar -xzf "$TARBALL" -C /tmp ./usr/lib/libasterisk*.so* 2>/dev/null || true
             if [ -f /tmp/usr/sbin/asterisk ]; then
-              ASTERISK_VERSION=$(/tmp/usr/sbin/asterisk -V 2>/dev/null | grep -oP 'Asterisk \K[0-9.]+' | head -n1 || echo "unknown")
+              chmod +x /tmp/usr/sbin/asterisk
+              ASTERISK_VERSION=$(LD_LIBRARY_PATH=/tmp/usr/lib /tmp/usr/sbin/asterisk -V 2>/dev/null | grep -oP 'Asterisk \K[0-9.]+' | head -n1 || echo "unknown")
+              echo ">>> Extracted version from binary: $ASTERISK_VERSION"
             else
               ASTERISK_VERSION="22-current"
+              echo ">>> WARNING: Could not determine version, using default: $ASTERISK_VERSION"
             fi
           fi
           

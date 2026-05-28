@@ -67,7 +67,7 @@ else
 fi
 
 # Banned Public IPs Check
-PUBLIC_BANNED_COUNT=$(fail2ban-client banned 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -vE '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)' | sort -u | grep -c . || echo "0")
+PUBLIC_BANNED_COUNT=$(fail2ban-client banned 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -vE '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)' | sort -u | grep -c . || true)
 
 # Display Banner
 echo -e "${BLUE}=========================================================${NC}"
