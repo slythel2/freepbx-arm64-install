@@ -2,14 +2,14 @@
 
 # ============================================================================
 # SCRIPT:    update_asterisk.sh
-# PROJECT:   Freepbx 17 for Debian 12 ARM64 Installer (Asterisk 22 + LAMP)
+# PROJECT:   FreePBX 17 ARM64 Installation Script (Asterisk 22 LTS)
 # ============================================================================
 
 set -e
 
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
-REPO_NAME="FreePBX-17-for-Armbian-12-Bookworm-test"
+REPO_NAME="freepbx-arm64-install-test"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/1.0/asterisk-22-current-arm64-debian12-v2.tar.gz"
 
 LOG_FOLDER="/var/log/pbx"

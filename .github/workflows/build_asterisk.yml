@@ -85,7 +85,7 @@ jobs:
             ###  Artifact
             
             - **File:** `${{ steps.version.outputs.tarball }}`
-            - **Platform:** Native ARM64 build optimized for Armbian/Debian Bookworm
+            - **Platform:** Native ARM64 build for Debian 12 Bookworm
             
             For more information, see the [README](https://github.com/${{ github.repository }}/blob/main/README.md).
           files: asterisk-*.tar.gz

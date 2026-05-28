@@ -1,77 +1,74 @@
-# Armbian 12 Bookworm FreePBX 17 Installer (ARM64)
+# FreePBX 17 ARM64 Installation Script
 
-A vibe-coded, "one-click" installer for Asterisk 22 LTS and FreePBX 17 on Debian 12 (ARM64).
+An automated installer for **Asterisk 22 LTS** and **FreePBX 17** on **Debian 12 ARM64** systems.
 
-**Disclaimer:** This is an amateur project created solely for my personal workflow to quickly deploy PBX systems on T95 Max+ TV boxes. I am hosting it here for my own convenience and storage. It works for me, **it should work on every ARM64 Debian 12 device** but it might not work for you. Use entirely at your own risk.
+This is the ARM64 equivalent of Sangoma's official [sng_freepbx_debian_install](https://github.com/FreePBX/sng_freepbx_debian_install) (which only supports x86_64).
 
-## **FreePBX 17 & Asterisk 22 Installer**
-**Installation**
-Requires a clean Armbian (Debian 12 Bookworm ARM64) installation and root access.
+## Installation
+
+Requires a clean **Debian 12 (Bookworm) ARM64** installation and root access.
 
 ```bash
-wget https://raw.githubusercontent.com/slythel2/FreePBX-17-for-Armbian-12-Bookworm-test/refs/heads/main/install.sh
+wget https://raw.githubusercontent.com/slythel2/freepbx-arm64-install-test/refs/heads/main/install.sh
 chmod +x install.sh
 ./install.sh
 ```
-Simply copy and paste.
 
-## Uninstall Script
+### CLI Flags
+| Flag | Description |
+|------|-------------|
+| `--skipversion` | Skip the self-update check at startup |
+| `--nochrony` | Skip chrony (NTP) installation |
+
+## Uninstall
 
 ```bash
-wget https://raw.githubusercontent.com/slythel2/FreePBX-17-for-Armbian-12-Bookworm-test/refs/heads/main/uninstall.sh
+wget https://raw.githubusercontent.com/slythel2/freepbx-arm64-install-test/refs/heads/main/uninstall.sh
 chmod +x uninstall.sh
 ./uninstall.sh
 ```
-This script completely removes the Asterisk, FreePBX, LAMP stack.
 
-## Features
-* **One Click Install:** Every dependency Asterisk or FreePBX needs will be installed aswell.
-* **Fast Deployment:** Uses pre-compiled Asterisk 22 artifacts to skip long compilation times.
-* **Solid Stack:** Debian 12 (Bookworm), FreePBX 17, Asterisk 22 LTS, PHP 8.2.
+Completely removes Asterisk, FreePBX, and the full LAMP stack.
 
+## Asterisk Updates
 
-Access
-Web Interface: http://<YOUR_IP>/admin
-
-MariaDB Root Password: armbianpbx
-
-
-## (Extra Content) 
-## Armbian 12 Image for T95 Max+ Android TV Box
-<img src="https://github.com/user-attachments/assets/dd161989-dca9-49a2-a757-504306ed0648" width="30%">
-
-You will also find a custom Armbian image in the **Releases** section of this repo.
-* **Source:** Derived from ophub builds.
-* **Target:** T95 Max+ (Amlogic S905X3 SoC).
-* **Why:** I included a custom **auto-install script** that automatically corrects paths and selects the correct options and configurations specifically for this TV box.
-* **Status:** Heavy WIP. Not polished, but functional for this project **IF YOU HAVE EXACTLY THE SAME TV BOX**
-* **Features:** 2GB swap already configured.
-
-# Instructions:
-1. Burn it with Rufus or BalenaEtcher on a USB stick or SD Card
-2. Remove the power cable, insert your USB stick/SD Card; there is a button at the bottom of the 3.5mm jack hole.
-3. With a toothpick, apply pressure on the button until you hear a click, insert the power cable, keep the button pushed for 6-10 seconds.
-4. It will automatically install and power off by itself.
-5. Connect via ssh: root - 1234
-
-# Important note for the boot sequence of the TVBOX after installation:
-*Toothpick USB booting won't be usable anymore*
-
-You can still force USB boot by nuking the eMMC:
+The installer includes an update script with automatic backup and rollback:
 
 ```bash
-dd if=/dev/zero of=/dev/mmcblk2 bs=1M count=1 && sync
+update_asterisk.sh
 ```
-and /reboot right after.
 
-SD card boot, though, should always be the priority and boot from SD should work as far as I know.
+Pre-compiled Asterisk binaries are built on native ARM64 GitHub Actions runners and published as [GitHub Releases](https://github.com/slythel2/freepbx-arm64-install-test/releases). The updater downloads the latest release, backs up the current installation, deploys the new binaries, and automatically rolls back if the health check fails.
 
+## Features
 
+* **One-click install** — all dependencies are handled automatically
+* **Fast deployment** — uses pre-compiled Asterisk 22 artifacts (no on-device compilation)
+* **Stack** — Debian 12 Bookworm, FreePBX 17, Asterisk 22 LTS, PHP 8.2, MariaDB
+* **Security** — Fail2ban with PJSIP + DDoS jails, Apache hardening, Trixie upgrade protection
+* **Update script** — Asterisk 22 updater script with backup, health check, and automatic rollback
 
-**Credits**
+## Access
 
-slythel2,
+After installation:
+- **Web Interface:** `http://<YOUR_IP>/admin`
 
-ophub (for the base image),
+## Licensing
 
-FreePBX & Asterisk Open Source Projects.
+This project is licensed under the **Apache License 2.0** for all automation scripts,
+GitHub Actions workflows, and configuration files authored by the maintainer.
+
+The pre-compiled Asterisk 22 binaries distributed via GitHub Releases are compiled
+directly from [upstream official sources](https://downloads.asterisk.org/pub/telephony/asterisk/)
+and remain subject to their original license
+(**[GNU General Public License v2](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)**).
+Full build transparency is provided by the public
+[build workflow](.github/workflows/build_asterisk.yml) and
+[builder script](builder_script.sh) in this repository.
+
+FreePBX is a registered trademark of [Sangoma Technologies](https://www.sangoma.com/).
+This project is not affiliated with or endorsed by Sangoma.
+
+---
+
+**Credits:** FreePBX & Asterisk open-source projects.

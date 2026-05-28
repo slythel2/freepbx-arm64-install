@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # ============================================================================
-# PROJECT:   Freepbx 17 for Debian 12 ARM64 Installer (Asterisk 22 + LAMP)
+# PROJECT:   FreePBX 17 ARM64 Installation Script (Asterisk 22 LTS)
 # LICENSE:   Apache-2.0
-# REPO:      https://github.com/slythel2/FreePBX-17-for-Armbian-12-Bookworm-test
+# REPO:      https://github.com/slythel2/freepbx-arm64-install-test
 # ============================================================================
 
 set -e
@@ -11,7 +11,7 @@ SCRIPTVER="0.7.0"
 
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
-REPO_NAME="FreePBX-17-for-Armbian-12-Bookworm-test"
+REPO_NAME="freepbx-arm64-install-test"
 REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/1.0/asterisk-22-current-arm64-debian12-v2.tar.gz"
 
@@ -711,15 +711,14 @@ install_freepbx_modules() {
 		warn "fwconsole ma downloadinstall returned non-zero. Some modules may have failed or already exist."
 	fi
 
-	# remove firewall module (causes network issues on armbian)
+	# remove firewall module (known to cause network lockout issues)
 	log "Removing problematic firewall module..."
 	fwconsole ma remove firewall &>/dev/null || true
 
 	# create DAHDI stub config files — the dahdiconfig module checks for these
-	# and throws Critical Errors on the dashboard if they're missing.
-	# On systems without physical telephony hardware (TV boxes, VPS) these files
-	# won't exist naturally. Empty stubs silence the warnings while keeping the
-	# module ready for use if DAHDI hardware is added later.
+	# and throws errors on the dashboard if they're missing. On systems without
+	# physical telephony hardware these files won't exist naturally.
+	# Empty stubs silence the warnings while keeping the module functional.
 	log "Creating DAHDI stub config files..."
 	mkdir -p /etc/dahdi
 	[ -f /etc/dahdi/modules ]     || echo "# DAHDI modules — configure if telephony hardware is installed" > /etc/dahdi/modules
@@ -865,7 +864,7 @@ main() {
 
 	clear
 	echo "========================================================"
-	echo "   ARMBIAN 12 FREEPBX 17 INSTALLER (Asterisk 22 LTS)  "
+	echo "   FREEPBX 17 ARM64 INSTALLER (Asterisk 22 LTS)       "
 	echo "   Version: $SCRIPTVER"
 	echo "========================================================"
 
