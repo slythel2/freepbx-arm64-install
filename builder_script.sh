@@ -33,7 +33,7 @@ apt-get install -y -qq --no-install-recommends \
     bison flex xmlstarlet libxml2-utils \
     libncurses5-dev libncursesw5-dev libxml2-dev libsqlite3-dev sqlite3 \
     libssl-dev uuid-dev libjansson-dev libedit-dev libxslt1-dev \
-    libicu-dev libsrtp2-dev libopus-dev libvorbis-dev libspeex-dev \
+    libicu-dev libsrtp2-dev libopus-dev libopusfile-dev libvorbis-dev libspeex-dev \
     libspeexdsp-dev libgsm1-dev portaudio19-dev \
     unixodbc unixodbc-dev odbcinst libltdl-dev libsystemd-dev \
     libasound2-dev libjwt-dev liburiparser-dev liblua5.4-dev \
@@ -54,6 +54,21 @@ rm asterisk.tar.gz
 
 echo ">>> [BUILDER] Downloading MP3 sources..."
 contrib/scripts/get_mp3_source.sh
+
+# --- 3b. OPUS OPEN SOURCE CODEC ---
+# The official Digium codec_opus binary is x86-only. On ARM64, we inject
+# the open-source transcoding module from traud/asterisk-opus instead.
+# This enables full Opus encode/decode natively on any architecture.
+echo ">>> [BUILDER] Patching in open-source Opus codec for ARM64..."
+OPUS_BRANCH="asterisk-13.7"
+OPUS_REPO="https://github.com/traud/asterisk-opus"
+wget -qO /tmp/opus-patch.tar.gz "${OPUS_REPO}/archive/${OPUS_BRANCH}.tar.gz"
+tar -xzf /tmp/opus-patch.tar.gz -C /tmp/
+cp -v /tmp/asterisk-opus-${OPUS_BRANCH}/include/asterisk/* ./include/asterisk/
+cp -v /tmp/asterisk-opus-${OPUS_BRANCH}/codecs/*              ./codecs/
+cp -v /tmp/asterisk-opus-${OPUS_BRANCH}/res/*                 ./res/
+rm -rf /tmp/opus-patch.tar.gz /tmp/asterisk-opus-${OPUS_BRANCH}
+echo ">>> [BUILDER] Opus open-source codec patched successfully."
 
 # --- 4. CONFIGURE ---
 echo ">>> [BUILDER] Configuring..."
@@ -130,6 +145,8 @@ menuselect/menuselect --enable CORE-SOUNDS-EN-ALAW menuselect.makeopts
 menuselect/menuselect --enable CORE-SOUNDS-EN-GSM menuselect.makeopts
 # BUILD_NATIVE is disabled to avoid optimizing for the specific CPU used by Github Workflows.
 menuselect/menuselect --disable BUILD_NATIVE menuselect.makeopts
+# Enable the open-source Opus transcoding module we patched in earlier
+menuselect/menuselect --enable codec_opus_open_source menuselect.makeopts
 
 # --- 6. COMPILE ---
 echo ">>> [BUILDER] Compiling (Native Speed)..."
