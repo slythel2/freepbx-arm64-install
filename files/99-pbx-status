@@ -66,6 +66,9 @@ else
     BANNED_STR="${RED}${LOCAL_BANNED}${NC}"
 fi
 
+# Banned Public IPs Check
+PUBLIC_BANNED_COUNT=$(fail2ban-client banned 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -vE '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)' | sort -u | grep -c . || echo "0")
+
 # Display Banner
 echo -e "${BLUE}=========================================================${NC}"
 echo -e "${BLUE}                   FREEPBX 17 ARM64 ${NC}"
@@ -82,6 +85,7 @@ echo -e "   MariaDB:          $MARIADB_STATUS"
 echo -e "   Apache Web:       $APACHE_STATUS"
 echo -e "   Fail2ban SEC:     $FAIL2BAN_STATUS"
 echo -e "   Banned Local IPs: $BANNED_STR"
+echo -e "   Banned Public IPs: $PUBLIC_BANNED_COUNT"
 echo -e ""
 echo -e " ${YELLOW}Remember to run update_asterisk.sh to update your Asterisk 22 version!${NC}"
 echo -e "${BLUE}=========================================================${NC}"

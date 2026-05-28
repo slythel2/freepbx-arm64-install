@@ -246,9 +246,8 @@ download_config_files() {
 	mkdir -p "$FILES_DIR"
 
 	local config_files=(
-		"asterisk.conf" "asterisk.service" "dbus-fix.conf"
+		"asterisk.conf" "asterisk.service"
 		"mariadb-tmpfiles.conf" "99-freepbx.cnf" "index.php"
-		"fix_free_perm.sh" "free-perm-fix.service"
 		"asterisk-pjsip.conf" "asterisk-jail.local" "99-pbx-status"
 		"odbcinst.ini.tpl" "odbc.ini.tpl"
 	)
@@ -290,7 +289,7 @@ install_dependencies() {
 
 	apt-get install -y \
 		git curl wget vim htop subversion sox pkg-config sngrep \
-		jq acl haveged isc-dhcp-client dnsutils bind9-dnsutils bind9-host \
+		jq acl dnsutils bind9-dnsutils bind9-host \
 		apache2 mariadb-server mariadb-client odbc-mariadb \
 		php php-cli php-common php-curl php-gd php-mbstring \
 		php-mysql php-soap php-xml php-intl php-zip php-bcmath \
@@ -393,19 +392,6 @@ install_ioncube_loader() {
 	rm -rf "$IONCUBE_DIR"
 }
 
-configure_networkmanager() {
-	# Only apply the dbus-fix override if NetworkManager is actually installed
-	# (Armbian uses NM, most VPS images use systemd-networkd instead)
-	if systemctl list-unit-files NetworkManager.service &>/dev/null && \
-	   systemctl list-unit-files NetworkManager.service | grep -q NetworkManager; then
-		log "NetworkManager detected — applying dbus-fix override..."
-		mkdir -p /etc/systemd/system/NetworkManager.service.d
-		cp "${FILES_DIR}/dbus-fix.conf" /etc/systemd/system/NetworkManager.service.d/dbus-fix.conf
-		systemctl daemon-reload
-	else
-		log "NetworkManager not found (VPS/cloud image) — skipping dbus-fix override."
-	fi
-}
 
 # ============================================================================
 # ASTERISK USER & DOWNLOAD
@@ -788,19 +774,6 @@ configure_fail2ban() {
 	fi
 }
 
-# ============================================================================
-# PERSISTENCE SERVICE
-# ============================================================================
-
-create_persistence_service() {
-	setCurrentStep "Creating persistence service for FreePBX"
-
-	cp "${FILES_DIR}/fix_free_perm.sh" /usr/local/bin/fix_free_perm.sh
-	chmod +x /usr/local/bin/fix_free_perm.sh
-
-	cp "${FILES_DIR}/free-perm-fix.service" /etc/systemd/system/free-perm-fix.service
-	systemctl enable free-perm-fix.service
-}
 
 # ============================================================================
 # LOGIN BANNER
@@ -907,7 +880,6 @@ main() {
 	install_dependencies
 	configure_php
 	install_ioncube_loader
-	configure_networkmanager
 
 	create_asterisk_user
 	download_asterisk_artifact
@@ -927,7 +899,6 @@ main() {
 	install_freepbx_modules
 
 	configure_fail2ban
-	create_persistence_service
 	create_system_banner
 	install_updater_script
 

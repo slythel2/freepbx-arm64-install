@@ -28,15 +28,6 @@ fi
 echo ""
 echo -e "${YELLOW}[0/7] safety checks and network fallback...${NC}"
 
-# repair /var/run symlink if damaged (critical for D-Bus and NetworkManager)
-if [ ! -L /var/run ] && [ -d /var/run ]; then
-    echo "  -> Fixing broken /var/run directory..."
-    mv /var/run /var/run_broken_$(date +%s) 2>/dev/null || true
-    ln -s /run /var/run
-elif [ ! -e /var/run ]; then
-    ln -s /run /var/run
-fi
-
 if ! systemctl is-active --quiet dbus 2>/dev/null; then
     echo -e "${RED}ERROR: D-Bus is not running. Aborting.${NC}"
     exit 1
@@ -50,16 +41,8 @@ NET_GW=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
 
 echo "✓ detected interface: $NET_IF (ip: ${NET_IP:-none}, gw: ${NET_GW:-none})"
 
-# backup NetworkManager config
-if [ -d /etc/NetworkManager ]; then
-    mkdir -p /tmp/nm_backup
-    cp -r /etc/NetworkManager /tmp/nm_backup/ 2>/dev/null || true
-    echo "✓ NetworkManager config backed up to /tmp/nm_backup"
-fi
-
 # protect system-critical packages from being touched
-apt-mark manual network-manager dbus libdbus-1-3 wpasupplicant \
-    isc-dhcp-client systemd systemd-sysv 2>/dev/null || true
+apt-mark manual dbus libdbus-1-3 systemd systemd-sysv 2>/dev/null || true
 
 # ============================================================================
 # STEP 1: stop services
@@ -83,10 +66,7 @@ pm2 kill &>/dev/null || true
 echo -e "${YELLOW}[2/7] removing custom systemd services...${NC}"
 
 systemctl disable asterisk &>/dev/null || true
-systemctl disable free-perm-fix.service &>/dev/null || true
 rm -f /etc/systemd/system/asterisk.service
-rm -f /etc/systemd/system/free-perm-fix.service
-rm -f /usr/local/bin/fix_free_perm.sh
 systemctl daemon-reload
 
 # ============================================================================
@@ -132,9 +112,6 @@ apt-get -f install -y 2>/dev/null || true
 # STEP 4: verify network survived the purge
 # ============================================================================
 echo -e "${YELLOW}[4/7] verifying network integrity...${NC}"
-
-# restart NM if it's installed
-systemctl restart NetworkManager &>/dev/null || true
 sleep 2
 
 if ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
@@ -156,11 +133,8 @@ else
             fi
         fi
     fi
-    # reinstall NM if something went wrong
     if ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
-        echo "✓ network recovered — reinstalling NetworkManager..."
-        apt-get install --reinstall -y network-manager 2>/dev/null || true
-        systemctl restart NetworkManager &>/dev/null || true
+        echo "✓ network recovered"
     else
         echo -e "${RED}✗ could not restore network. Manual intervention needed.${NC}"
         echo "  try: ip link set $NET_IF up && dhclient $NET_IF"
@@ -229,7 +203,6 @@ rm -f /etc/tmpfiles.d/mariadb.conf
 rm -f /etc/fail2ban/filter.d/asterisk-pjsip.conf
 rm -f /etc/fail2ban/jail.d/asterisk.local
 rm -f /etc/fail2ban/jail.d/sshd.local
-rm -rf /etc/systemd/system/NetworkManager.service.d/dbus-fix.conf
 rm -f /etc/apt/preferences.d/99-block-trixie.pref
 rm -f /var/run/freepbx_installer.pid
 systemctl daemon-reload
@@ -251,10 +224,8 @@ else
     FAIL=1
 fi
 
-if systemctl is-active --quiet NetworkManager 2>/dev/null; then
-    echo -e "${GREEN}✓ NetworkManager OK${NC}"
-elif ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
-    echo -e "${YELLOW}⚠ NetworkManager not running but network is up (static fallback)${NC}"
+if ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
+    echo -e "${GREEN}✓ Network connectivity OK${NC}"
 else
     echo -e "${RED}✗ no network connectivity${NC}"
     FAIL=1
@@ -273,6 +244,3 @@ fi
 
 echo ""
 echo -e "${GREEN}reboot recommended to complete cleanup.${NC}"
-if [ -f /tmp/nm_backup/NetworkManager/NetworkManager.conf ]; then
-    echo "NetworkManager backup available at: /tmp/nm_backup"
-fi
