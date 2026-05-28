@@ -734,6 +734,9 @@ install_freepbx_modules() {
 	# when trying to update those files later.
 	log "Fixing permissions after module installation..."
 	fwconsole chown
+	# fwconsole chown sometimes misses specific config files (like http_custom.conf)
+	# Force explicit ownership to prevent GUI Permission Denied errors
+	chown -R asterisk:asterisk /etc/asterisk /var/www/html /var/lib/asterisk /var/spool/asterisk /var/log/asterisk
 
 	log "All modules installed. Reloading FreePBX..."
 	fwconsole reload || true
