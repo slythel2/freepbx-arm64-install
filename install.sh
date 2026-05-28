@@ -711,6 +711,9 @@ install_freepbx_modules() {
 		warn "fwconsole ma downloadinstall returned non-zero. Some modules may have failed or already exist."
 	fi
 
+	log "Upgrading all modules (framework, core, etc.) to ensure dependencies are met..."
+	fwconsole ma upgradeall >> "$LOG_FILE" 2>&1 || true
+
 	# remove firewall module (known to cause network lockout issues)
 	log "Removing problematic firewall module..."
 	fwconsole ma remove firewall &>/dev/null || true
@@ -737,6 +740,9 @@ install_freepbx_modules() {
 	# fwconsole chown sometimes misses specific config files (like http_custom.conf)
 	# Force explicit ownership to prevent GUI Permission Denied errors
 	chown -R asterisk:asterisk /etc/asterisk /var/www/html /var/lib/asterisk /var/spool/asterisk /var/log/asterisk
+
+	log "Updating Sangoma GPG keys to prevent dashboard warnings..."
+	fwconsole util updategpgkey >> "$LOG_FILE" 2>&1 || true
 
 	log "All modules installed. Reloading FreePBX..."
 	fwconsole reload || true
