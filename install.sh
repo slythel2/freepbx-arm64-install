@@ -234,6 +234,21 @@ check_root_privileges() {
 	fi
 }
 
+check_disk_space() {
+	local path="$1" required_gb="$2" desc="${3:-$1}"
+	local available_kb
+	available_kb=$(df -k "$path" 2>/dev/null | awk 'NR==2 {print $4}')
+	if [ -z "$available_kb" ]; then
+		warn "Could not check disk space at $path"
+		return
+	fi
+	local required_kb=$(( required_gb * 1024 * 1024 ))
+	if [ "$available_kb" -lt "$required_kb" ]; then
+		error "Insufficient disk space at $path: need ${required_gb}GB, have $(( available_kb / 1024 / 1024 ))GB free"
+	fi
+	log "Disk space OK: $desc has $(( available_kb / 1024 / 1024 ))GB free (need ${required_gb}GB)"
+}
+
 check_architecture() {
 	ARCH=$(dpkg --print-architecture)
 	if [ "$ARCH" != "arm64" ] && [ "$ARCH" != "amd64" ]; then
@@ -890,6 +905,7 @@ main() {
 	echo "========================================================"
 
 	# Pre-flight checks
+	check_disk_space "/" 5 "root filesystem"
 	check_architecture
 	check_script_version
 	block_trixie_upgrade

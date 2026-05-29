@@ -173,6 +173,14 @@ menuselect/menuselect --disable BUILD_NATIVE menuselect.makeopts
 menuselect/menuselect --enable codec_opus_open_source menuselect.makeopts
 
 # --- 6. COMPILE ---
+echo ">>> [BUILDER] Checking available disk space before compilation..."
+_avail_kb=$(df -k /usr/src 2>/dev/null | awk 'NR==2 {print $4}')
+if [ -n "$_avail_kb" ] && [ "$_avail_kb" -lt $(( 6 * 1024 * 1024 )) ]; then
+    echo ">>> [BUILDER] ERROR: Insufficient disk space at /usr/src: need 6GB, have $(( _avail_kb / 1024 / 1024 ))GB free"
+    exit 1
+fi
+unset _avail_kb
+
 echo ">>> [BUILDER] Compiling (Native Speed)..."
 make -j$(nproc)
 

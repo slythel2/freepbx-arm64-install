@@ -68,6 +68,21 @@ if [[ $EUID -ne 0 ]]; then
 	exit 1
 fi
 
+check_disk_space() {
+	local path="$1" required_gb="$2" desc="${3:-$1}"
+	local available_kb
+	available_kb=$(df -k "$path" 2>/dev/null | awk 'NR==2 {print $4}')
+	if [ -z "$available_kb" ]; then
+		warn "Could not check disk space at $path"
+		return
+	fi
+	local required_kb=$(( required_gb * 1024 * 1024 ))
+	if [ "$available_kb" -lt "$required_kb" ]; then
+		error "Insufficient disk space at $path: need ${required_gb}GB, have $(( available_kb / 1024 / 1024 ))GB free"
+	fi
+	log "Disk space OK: $desc has $(( available_kb / 1024 / 1024 ))GB free (need ${required_gb}GB)"
+}
+
 # Acquire exclusive lock (prevent concurrent runs)
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
@@ -153,6 +168,8 @@ fi
 # ============================================================================
 # BACKUP (persistent directory, survives reboot)
 # ============================================================================
+
+check_disk_space "/var/backups" 1 "backup directory"
 
 BACKUP_DIR="${BACKUP_BASE}/backup_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP_DIR"
