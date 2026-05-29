@@ -150,7 +150,7 @@ menuselect/menuselect --enable codec_opus_open_source menuselect.makeopts
 
 # --- 6. COMPILE ---
 echo ">>> [BUILDER] Compiling (Native Speed)..."
-make -j$(nproc)
+make -j"$(nproc)"
 
 # --- 7. INSTALL & PACKAGE ---
 echo ">>> [BUILDER] Packaging..."
