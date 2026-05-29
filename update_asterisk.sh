@@ -307,7 +307,7 @@ if [ $ASTERISK_HEALTHY -eq 0 ]; then
 
 	# Restore shared libraries
 	if [ -d "$BACKUP_DIR/libs" ] && ls "$BACKUP_DIR/libs"/*.so* &>/dev/null; then
-		cp -f "$BACKUP_DIR/libs"/* /usr/lib/
+		cp -f "$BACKUP_DIR/libs"/*.so* /usr/lib/
 	fi
 
 	ldconfig
