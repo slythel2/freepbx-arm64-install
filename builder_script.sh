@@ -182,7 +182,7 @@ fi
 unset _avail_kb
 
 echo ">>> [BUILDER] Compiling (Native Speed)..."
-make -j$(nproc)
+make -j"$(nproc)"
 
 # --- 7. INSTALL & PACKAGE ---
 echo ">>> [BUILDER] Packaging..."
