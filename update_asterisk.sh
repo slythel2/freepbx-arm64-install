@@ -16,6 +16,31 @@ LOG_FOLDER="/var/log/pbx"
 LOG_FILE="${LOG_FOLDER}/update_asterisk-$(date '+%Y.%m.%d-%H.%M.%S').log"
 LOCK_FILE="/var/lock/asterisk_update.lock"
 BACKUP_BASE="/var/backups/asterisk"
+STAGE_DIR="/tmp/asterisk_update_stage"
+
+# --- ARGUMENT PARSING ---
+DRY_RUN=false
+while [[ $# -gt 0 ]]; do
+	case $1 in
+		--dry-run)
+			DRY_RUN=true
+			shift
+			;;
+		--help|-h)
+			echo "Usage: $0 [--dry-run]"
+			echo ""
+			echo "Options:"
+			echo "  --dry-run    Check available version without downloading or stopping Asterisk"
+			echo "  --help       Show this help"
+			exit 0
+			;;
+		*)
+			echo "Unknown option: $1"
+			echo "Usage: $0 [--dry-run]"
+			exit 1
+			;;
+	esac
+done
 
 # Colors
 RED='\033[0;31m'
@@ -52,6 +77,8 @@ fi
 
 mkdir -p "${LOG_FOLDER}"
 touch "${LOG_FILE}"
+
+trap 'rm -rf "$STAGE_DIR" /tmp/asterisk_update.tar.gz 2>/dev/null' INT TERM
 
 echo -e "${GREEN}========================================================${NC}"
 echo -e "${GREEN}          ASTERISK 22 UPDATER (with Rollback)           ${NC}"
@@ -110,6 +137,17 @@ else
 			message "Update available: ${CURRENT_VERSION} -> ${AVAILABLE_VERSION}"
 		fi
 	fi
+fi
+
+# Dry-run: show what would be done and exit without touching the system
+if [ "$DRY_RUN" = true ]; then
+	echo ""
+	echo -e "${GREEN}[DRY-RUN] No changes will be made to the system.${NC}"
+	echo -e "${GREEN}  Current version  : ${CURRENT_VERSION}${NC}"
+	echo -e "${GREEN}  Available version: ${AVAILABLE_VERSION:-unknown}${NC}"
+	echo -e "${GREEN}  Artifact URL     : ${ASTERISK_ARTIFACT_URL}${NC}"
+	echo -e "${GREEN}[DRY-RUN] Asterisk has NOT been stopped. Exiting.${NC}"
+	exit 0
 fi
 
 # ============================================================================
@@ -190,7 +228,6 @@ fi
 
 message "Downloading Asterisk update artifact..."
 
-STAGE_DIR="/tmp/asterisk_update_stage"
 rm -rf "$STAGE_DIR" && mkdir -p "$STAGE_DIR"
 
 DOWNLOAD_SUCCESS=0
