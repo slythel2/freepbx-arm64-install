@@ -404,7 +404,7 @@ install_ioncube_loader() {
 			echo "zend_extension = $PHP_EXT_DIR/ioncube_loader_lin_${PHP_VER}.so" > "/etc/php/${PHP_VER}/mods-available/ioncube.ini"
 			ln -sf /etc/php/${PHP_VER}/mods-available/ioncube.ini /etc/php/${PHP_VER}/apache2/conf.d/00-ioncube.ini
 			ln -sf /etc/php/${PHP_VER}/mods-available/ioncube.ini /etc/php/${PHP_VER}/cli/conf.d/00-ioncube.ini
-			log "âœ“ ionCube Loader installed successfully"
+			log “ionCube Loader installed successfully”
 		else
 			warn "ionCube Loader file not found, FreePBX commercial modules may not work"
 		fi
@@ -634,7 +634,7 @@ verify_dns() {
 	setCurrentStep "Verifying DNS resolution for SIP trunks..."
 	if command -v dig &> /dev/null; then
 		if dig "google.com" +short | grep -q .; then
-			log "âœ“ DNS resolution is working correctly"
+			log “DNS resolution is working correctly”
 		else
 			warn "DNS resolution may have issues. Check /etc/resolv.conf"
 		fi
@@ -800,7 +800,7 @@ configure_fail2ban() {
 	if systemctl is-active --quiet fail2ban; then
 		JAILS_ACTIVE=$(fail2ban-client status 2>/dev/null | grep "Jail list" | grep -o "asterisk" | wc -l)
 		if [ "$JAILS_ACTIVE" -ge 1 ]; then
-			log "âœ“ Fail2ban is active and protecting Asterisk (${JAILS_ACTIVE} jails)"
+			log “Fail2ban is active and protecting Asterisk (${JAILS_ACTIVE} jails)”
 		else
 			warn "Fail2ban is running but jails may not be active yet."
 		fi
