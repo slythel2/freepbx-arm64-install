@@ -82,7 +82,7 @@ warn() { echo -e "${YELLOW}[WARNING] $1${NC}" | tee -a "$LOG_FILE"; }
 
 error() {
 	echo -e "${RED}[ERROR] $1${NC}" | tee -a "$LOG_FILE"
-	errorHandler "$BASH_LINENO" 1 "$1"
+	errorHandler "${BASH_LINENO[0]}" 1 "$1"
 }
 
 errorHandler() {
