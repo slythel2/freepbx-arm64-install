@@ -15,7 +15,7 @@ REPO_NAME="freepbx-arm64-install-test"
 REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/1.0/asterisk-22-current-arm64-debian12-v2.tar.gz"
 
-DB_ROOT_PASS="armbianpbx"
+DB_ROOT_PASS=$(openssl rand -base64 18 | tr -d '/+=')
 LOG_FOLDER="/var/log/pbx"
 LOG_FILE="${LOG_FOLDER}/freepbx17-install-$(date '+%Y.%m.%d-%H.%M.%S').log"
 FILES_DIR="/tmp/pbx_installer_files"
@@ -492,6 +492,9 @@ setup_mariadb() {
 	fi
 
 	mysqladmin -u root password "$DB_ROOT_PASS" 2>/dev/null || true
+	printf '[client]\npassword=%s\n' "$DB_ROOT_PASS" > /root/.my.cnf
+	chmod 600 /root/.my.cnf
+	log "MariaDB root password saved to /root/.my.cnf (root-only)"
 }
 
 configure_database() {
