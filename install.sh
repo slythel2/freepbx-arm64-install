@@ -514,7 +514,6 @@ configure_database() {
 	fi
 	log "Found MariaDB socket at: $REAL_SOCKET"
 	ln -sf "$REAL_SOCKET" /tmp/mysql.sock
-	chmod 777 /tmp/mysql.sock 2>/dev/null || true
 }
 
 configure_odbc() {
