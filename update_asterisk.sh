@@ -158,34 +158,7 @@ if [ ! -f /etc/asterisk/asterisk.conf ]; then
 fi
 
 # ============================================================================
-# GRACEFUL STOP
-# ============================================================================
-
-message "Stopping Asterisk service..."
-if systemctl is-active --quiet asterisk 2>/dev/null; then
-	# Try graceful shutdown first (gives active calls time to end)
-	asterisk -rx "core stop gracefully" >> "$LOG_FILE" 2>&1 || true
-	for i in {1..15}; do
-		if ! systemctl is-active --quiet asterisk 2>/dev/null; then
-			log "Asterisk stopped gracefully after ${i}x2 seconds."
-			break
-		fi
-		sleep 2
-	done
-fi
-
-# Force stop if still running
-systemctl stop asterisk >> "$LOG_FILE" 2>&1 || true
-sleep 1
-
-if pgrep -x asterisk > /dev/null 2>&1; then
-	warn "Asterisk still running after graceful stop, forcing kill..."
-	pkill -9 asterisk 2>/dev/null || true
-	sleep 1
-fi
-
-# ============================================================================
-# DOWNLOAD
+# DOWNLOAD (before stopping Asterisk to minimize outage window)
 # ============================================================================
 
 message "Downloading Asterisk update artifact..."
@@ -212,10 +185,34 @@ for attempt in {1..3}; do
 done
 
 if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
-	# Restart Asterisk with current version before aborting
-	message "Download failed. Restarting Asterisk with current version..."
-	systemctl start asterisk >> "$LOG_FILE" 2>&1 || true
-	error "Failed to download update after 3 attempts."
+	error "Failed to download update after 3 attempts. Asterisk was NOT stopped."
+fi
+
+# ============================================================================
+# GRACEFUL STOP (after successful download — outage starts here)
+# ============================================================================
+
+message "Stopping Asterisk service..."
+if systemctl is-active --quiet asterisk 2>/dev/null; then
+	# Try graceful shutdown first (gives active calls time to end)
+	asterisk -rx "core stop gracefully" >> "$LOG_FILE" 2>&1 || true
+	for i in {1..15}; do
+		if ! systemctl is-active --quiet asterisk 2>/dev/null; then
+			log "Asterisk stopped gracefully after ${i}x2 seconds."
+			break
+		fi
+		sleep 2
+	done
+fi
+
+# Force stop if still running
+systemctl stop asterisk >> "$LOG_FILE" 2>&1 || true
+sleep 1
+
+if pgrep -x asterisk > /dev/null 2>&1; then
+	warn "Asterisk still running after graceful stop, forcing kill..."
+	pkill -9 asterisk 2>/dev/null || true
+	sleep 1
 fi
 
 # ============================================================================
