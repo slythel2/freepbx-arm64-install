@@ -49,9 +49,18 @@ while [[ $# -gt 0 ]]; do
 			nochrony=true
 			shift
 			;;
+		--help|-h)
+			echo "Usage: $0 [OPTIONS]"
+			echo ""
+			echo "Options:"
+			echo "  --skipversion    Skip remote installer version check"
+			echo "  --nochrony       Skip chrony NTP installation"
+			echo "  --help           Show this help"
+			exit 0
+			;;
 		-*)
 			echo "Unknown option: $1"
-			echo "Usage: $0 [--skipversion] [--nochrony]"
+			echo "Usage: $0 [--skipversion] [--nochrony] [--help]"
 			exit 1
 			;;
 		*)

@@ -40,12 +40,21 @@ apt-get install -y -qq --no-install-recommends \
     python3 python3-dev python-is-python3 procps ca-certificates gnupg
 
 # --- 3. DOWNLOAD ---
+if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    echo "Usage: $0 [ASTERISK_VERSION]"
+    echo ""
+    echo "Arguments:"
+    echo "  ASTERISK_VERSION  Asterisk version to build (default: 22-current)"
+    echo "                    Examples: 22-current, 22.9.0, 21-current"
+    exit 0
+fi
+
 ASTERISK_VER="$1"
 [ -z "$ASTERISK_VER" ] && ASTERISK_VER="22-current"
 BUILD_DIR="/usr/src/asterisk_build"
 
-mkdir -p $BUILD_DIR
-cd $BUILD_DIR
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
 
 echo ">>> [BUILDER] Downloading Asterisk $ASTERISK_VER..."
 wget -qO asterisk.tar.gz "https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-${ASTERISK_VER}.tar.gz"
