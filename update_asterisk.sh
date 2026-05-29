@@ -326,7 +326,7 @@ sleep 5
 ASTERISK_HEALTHY=0
 NEW_VERSION="Unknown"
 for i in {1..10}; do
-	if asterisk -rx "core show version" &>/dev/null; then
+	if systemctl is-active --quiet asterisk 2>/dev/null && asterisk -rx "core show version" &>/dev/null; then
 		ASTERISK_HEALTHY=1
 		NEW_VERSION=$(asterisk -rx "core show version" 2>/dev/null | grep -oP 'Asterisk \K[0-9]+\.[0-9]+\.[0-9]+' || echo "Unknown")
 		echo -e "${GREEN}✓ Asterisk is responding to CLI — Update successful!${NC}"
