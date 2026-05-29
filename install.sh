@@ -33,6 +33,7 @@ NC='\033[0m'
 
 # Global state
 currentStep=""
+STEP_NUM=0
 
 # CLI flags (defaults)
 skipversion=false
@@ -77,7 +78,7 @@ done
 echo_ts() { echo "$(date +"%Y-%m-%d %T") - $*"; }
 log() { echo_ts "$*" >> "$LOG_FILE"; }
 message() { echo_ts "$*" | tee -a "$LOG_FILE"; }
-setCurrentStep() { currentStep="$1"; message "${currentStep}"; }
+setCurrentStep() { STEP_NUM=$(( STEP_NUM + 1 )); currentStep="$1"; message "[Step ${STEP_NUM}] ${currentStep}"; }
 warn() { echo -e "${YELLOW}[WARNING] $1${NC}" | tee -a "$LOG_FILE"; }
 
 error() {
@@ -866,6 +867,28 @@ verify_installation() {
 	fi
 }
 
+print_install_summary() {
+	local asterisk_ver freepbx_ver php_ver mariadb_ver ip_addr
+	asterisk_ver=$(asterisk -rx "core show version" 2>/dev/null | grep -oP 'Asterisk \K[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+	freepbx_ver=$(fwconsole --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "unknown")
+	php_ver=$(php -r 'echo PHP_VERSION;' 2>/dev/null || echo "unknown")
+	mariadb_ver=$(mysql --version 2>/dev/null | grep -oP 'Distrib \K[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+	ip_addr=$(hostname -I | cut -d' ' -f1)
+
+	echo ""
+	echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
+	echo -e "${GREEN}║              INSTALLATION SUMMARY                        ║${NC}"
+	echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
+	echo -e "${GREEN}║${NC}  Asterisk  : ${asterisk_ver}"
+	echo -e "${GREEN}║${NC}  FreePBX   : ${freepbx_ver}"
+	echo -e "${GREEN}║${NC}  PHP       : ${php_ver}"
+	echo -e "${GREEN}║${NC}  MariaDB   : ${mariadb_ver}"
+	echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
+	echo -e "${GREEN}║${NC}  Access    : http://${ip_addr}/admin"
+	echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
+	echo ""
+}
+
 cleanup() {
 	setCurrentStep "Cleaning up temporary files..."
 	rm -rf "${FILES_DIR}"
@@ -944,9 +967,11 @@ main() {
 	execution_time="$(($(date +%s) - start))"
 	message "Total installation time: $execution_time seconds"
 
+	print_install_summary
+
 	echo -e "${GREEN}========================================================${NC}"
 	echo -e "${GREEN}            FREEPBX INSTALLATION COMPLETE!              ${NC}"
-	echo -e "${GREEN}           Access: http://$(hostname -I | cut -d' ' -f1)/admin  ${NC}"
+	echo -e "${GREEN}           Duration: ${execution_time}s (~$(( execution_time / 60 )) min)    ${NC}"
 	echo -e "${GREEN}========================================================${NC}"
 
 	exit 0
