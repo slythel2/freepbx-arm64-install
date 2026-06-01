@@ -84,15 +84,20 @@ contrib/scripts/get_mp3_source.sh
 # the open-source transcoding module from traud/asterisk-opus instead.
 # This enables full Opus encode/decode natively on any architecture.
 echo ">>> [BUILDER] Patching in open-source Opus codec for ARM64..."
-OPUS_BRANCH="asterisk-13.7"
+# Pinned to an IMMUTABLE commit SHA (not a mutable branch): a force-push or
+# account compromise of this third-party repo must not be able to silently
+# alter the C source that gets compiled into the binary we ship to every user.
+# To upgrade, review upstream and bump OPUS_COMMIT deliberately.
+# Pin tracks branch asterisk-13.7 as of 2026-05-30.
 OPUS_REPO="https://github.com/traud/asterisk-opus"
-wget -qO /tmp/opus-patch.tar.gz "${OPUS_REPO}/archive/${OPUS_BRANCH}.tar.gz"
+OPUS_COMMIT="a959f072d3f364be983dd27e6e250b038aaef747"
+wget -qO /tmp/opus-patch.tar.gz "${OPUS_REPO}/archive/${OPUS_COMMIT}.tar.gz"
 tar -xzf /tmp/opus-patch.tar.gz -C /tmp/
-cp -v /tmp/asterisk-opus-${OPUS_BRANCH}/include/asterisk/* ./include/asterisk/
-cp -v /tmp/asterisk-opus-${OPUS_BRANCH}/codecs/*              ./codecs/
-cp -v /tmp/asterisk-opus-${OPUS_BRANCH}/res/*                 ./res/
-rm -rf /tmp/opus-patch.tar.gz /tmp/asterisk-opus-${OPUS_BRANCH}
-echo ">>> [BUILDER] Opus open-source codec patched successfully."
+cp -v /tmp/asterisk-opus-${OPUS_COMMIT}/include/asterisk/* ./include/asterisk/
+cp -v /tmp/asterisk-opus-${OPUS_COMMIT}/codecs/*              ./codecs/
+cp -v /tmp/asterisk-opus-${OPUS_COMMIT}/res/*                 ./res/
+rm -rf /tmp/opus-patch.tar.gz /tmp/asterisk-opus-${OPUS_COMMIT}
+echo ">>> [BUILDER] Opus open-source codec patched successfully (commit ${OPUS_COMMIT})."
 
 # --- 4. CONFIGURE ---
 echo ">>> [BUILDER] Configuring..."
