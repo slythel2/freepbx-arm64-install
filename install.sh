@@ -16,6 +16,11 @@ REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/1.0/asterisk-22-current-arm64-debian12-v2.tar.gz"
 
 DB_ROOT_PASS=$(openssl rand -base64 18 | tr -d '/+=')
+# Distinct credential for the FreePBX application DB user. Must NOT equal the
+# MariaDB root password: FreePBX stores this in /etc/freepbx.conf (readable by
+# the asterisk/web user), so reusing the root password would let a web-tier
+# compromise escalate to DB superuser.
+DB_ASTERISK_PASS=$(openssl rand -base64 18 | tr -d '/+=')
 LOG_FOLDER="/var/log/pbx"
 LOG_FILE="${LOG_FOLDER}/freepbx17-install-$(date '+%Y.%m.%d-%H.%M.%S').log"
 FILES_DIR="/tmp/pbx_installer_files"
@@ -547,12 +552,15 @@ setup_mariadb() {
 configure_database() {
 	setCurrentStep "Configuring databases and permissions"
 
-	mysql -u root -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS asterisk; CREATE DATABASE IF NOT EXISTS asteriskcdrdb;"
-	mysql -u root -p"$DB_ROOT_PASS" -e "GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS';"
-	mysql -u root -p"$DB_ROOT_PASS" -e "GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'127.0.0.1' IDENTIFIED BY '$DB_ROOT_PASS';"
-	mysql -u root -p"$DB_ROOT_PASS" -e "GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'localhost';"
-	mysql -u root -p"$DB_ROOT_PASS" -e "GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'127.0.0.1';"
-	mysql -u root -p"$DB_ROOT_PASS" -e "FLUSH PRIVILEGES;"
+	# root authenticates via /root/.my.cnf (written in setup_mariadb), so the
+	# password is never placed on the command line where local users could read
+	# it from `ps`/ /proc/<pid>/cmdline.
+	mysql -u root -e "CREATE DATABASE IF NOT EXISTS asterisk; CREATE DATABASE IF NOT EXISTS asteriskcdrdb;"
+	mysql -u root -e "GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost' IDENTIFIED BY '$DB_ASTERISK_PASS';"
+	mysql -u root -e "GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'127.0.0.1' IDENTIFIED BY '$DB_ASTERISK_PASS';"
+	mysql -u root -e "GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'localhost';"
+	mysql -u root -e "GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'127.0.0.1';"
+	mysql -u root -e "FLUSH PRIVILEGES;"
 
 	log "Configuring MySQL socket for FreePBX..."
 	REAL_SOCKET=$(find /run /var/run -name mysqld.sock 2>/dev/null | head -n 1)
@@ -690,7 +698,7 @@ install_freepbx() {
 	log "FreePBX extracted and ready."
 
 	log "Verifying MySQL connection..."
-	if ! mysql -u asterisk -p"$DB_ROOT_PASS" -e "SELECT 1;" &> /dev/null; then
+	if ! mysql -u asterisk -p"$DB_ASTERISK_PASS" -e "SELECT 1;" &> /dev/null; then
 		error "Cannot connect to MySQL as asterisk user."
 	fi
 
@@ -701,7 +709,7 @@ install_freepbx() {
 	# run with verbose output so we can check for real errors
 	./install -n -v \
 		--dbuser asterisk \
-		--dbpass "$DB_ROOT_PASS" \
+		--dbpass "$DB_ASTERISK_PASS" \
 		--webroot /var/www/html \
 		--user asterisk \
 		--group asterisk 2>&1 | tee /tmp/freepbx_install.log
