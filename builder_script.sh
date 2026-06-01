@@ -205,4 +205,11 @@ TAR_NAME="asterisk-${ASTERISK_VER}-arm64-debian12.tar.gz"
 echo ">>> [BUILDER] Creating archive at $OUTPUT_DIR/$TAR_NAME..."
 tar -czvf "$OUTPUT_DIR/$TAR_NAME" .
 
+# Publish a SHA256 checksum alongside the artifact so the consuming side
+# (install.sh / update_asterisk.sh) can verify integrity before extracting it
+# as root. Written with the bare filename so `sha256sum -c` works in-place.
+echo ">>> [BUILDER] Generating SHA256 checksum..."
+( cd "$OUTPUT_DIR" && sha256sum "$TAR_NAME" > "$TAR_NAME.sha256" )
+echo ">>> [BUILDER] Checksum: $(cat "$OUTPUT_DIR/$TAR_NAME.sha256")"
+
 echo ">>> [BUILDER] SUCCESS! Artifact ready: $TAR_NAME"

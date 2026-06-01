@@ -121,12 +121,14 @@ message "Current installed version: ${CURRENT_VERSION}"
 
 # Fetch latest release info
 RELEASE_JSON=$(curl -s "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest")
-LATEST_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | contains("asterisk")) | .browser_download_url' | head -n 1)
+LATEST_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select((.name | contains("asterisk")) and (.name | endswith(".tar.gz"))) | .browser_download_url' | head -n 1)
+SHA_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select((.name | contains("asterisk")) and (.name | endswith(".sha256"))) | .browser_download_url' | head -n 1)
 RELEASE_TAG=$(echo "$RELEASE_JSON" | jq -r '.tag_name // empty')
 
 if [ -z "$LATEST_URL" ]; then
 	warn "Could not fetch latest release, using fallback URL."
 	ASTERISK_ARTIFACT_URL="$FALLBACK_ARTIFACT"
+	SHA_URL=""
 else
 	log "Latest release found: $LATEST_URL (tag: ${RELEASE_TAG:-unknown})"
 	ASTERISK_ARTIFACT_URL="$LATEST_URL"
@@ -220,12 +222,29 @@ message "Downloading Asterisk update artifact..."
 
 rm -rf "$STAGE_DIR" && mkdir -p "$STAGE_DIR"
 
+# Fetch the published SHA256 (if any) to verify integrity before deploying
+# binaries as root. Older releases without a checksum fall back to a
+# gzip-validity check.
+EXPECTED_SHA=""
+if [ -n "${SHA_URL:-}" ] && wget -q -O /tmp/asterisk_update.tar.gz.sha256 "$SHA_URL"; then
+	EXPECTED_SHA=$(awk '{print $1}' /tmp/asterisk_update.tar.gz.sha256)
+fi
+rm -f /tmp/asterisk_update.tar.gz.sha256
+[ -z "$EXPECTED_SHA" ] && warn "No SHA256 checksum published for this release; integrity will not be verified."
+
 DOWNLOAD_SUCCESS=0
 for attempt in {1..3}; do
 	if wget -q --show-progress -O /tmp/asterisk_update.tar.gz "$ASTERISK_ARTIFACT_URL"; then
-		if tar -tzf /tmp/asterisk_update.tar.gz > /dev/null 2>&1; then
+		if [ -n "$EXPECTED_SHA" ] && [ "$(sha256sum /tmp/asterisk_update.tar.gz | awk '{print $1}')" != "$EXPECTED_SHA" ]; then
+			warn "SHA256 checksum MISMATCH — refusing this artifact. Attempt $attempt/3"
+			rm -f /tmp/asterisk_update.tar.gz
+		elif tar -tzf /tmp/asterisk_update.tar.gz > /dev/null 2>&1; then
 			DOWNLOAD_SUCCESS=1
-			log "Update artifact downloaded and verified."
+			if [ -n "$EXPECTED_SHA" ]; then
+				log "Update artifact downloaded and SHA256-verified."
+			else
+				log "Update artifact downloaded (validity-checked; no checksum available)."
+			fi
 			break
 		else
 			warn "Downloaded file corrupted. Attempt $attempt/3"
@@ -239,7 +258,7 @@ for attempt in {1..3}; do
 done
 
 if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
-	error "Failed to download update after 3 attempts. Asterisk was NOT stopped."
+	error "Failed to download a valid update after 3 attempts. Asterisk was NOT stopped."
 fi
 
 # ============================================================================

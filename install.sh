@@ -433,24 +433,47 @@ create_asterisk_user() {
 download_asterisk_artifact() {
 	setCurrentStep "Fetching latest Asterisk 22 release..."
 
-	LATEST_URL=$(curl -s "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" \
-		| jq -r '.assets[] | select(.name | contains("asterisk")) | .browser_download_url' | head -n 1)
+	local release_json
+	release_json=$(curl -s "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest")
+	LATEST_URL=$(echo "$release_json" | jq -r '.assets[] | select((.name | contains("asterisk")) and (.name | endswith(".tar.gz"))) | .browser_download_url' | head -n 1)
+	local sha_url
+	sha_url=$(echo "$release_json" | jq -r '.assets[] | select((.name | contains("asterisk")) and (.name | endswith(".sha256"))) | .browser_download_url' | head -n 1)
 
 	if [ -z "$LATEST_URL" ]; then
 		warn "Could not fetch latest release from GitHub API, using fallback URL."
 		ASTERISK_ARTIFACT_URL="$FALLBACK_ARTIFACT"
+		sha_url=""
 	else
 		log "Latest release found: $LATEST_URL"
 		ASTERISK_ARTIFACT_URL="$LATEST_URL"
+	fi
+
+	# Fetch the published SHA256 (if any) so we can verify integrity BEFORE
+	# extracting attacker-influenceable content as root. If the release has no
+	# checksum asset (older releases) we fall back to a gzip-validity check.
+	local expected_sha=""
+	if [ -n "$sha_url" ] && wget -q -O /tmp/asterisk.tar.gz.sha256 "$sha_url"; then
+		expected_sha=$(awk '{print $1}' /tmp/asterisk.tar.gz.sha256)
+	fi
+	rm -f /tmp/asterisk.tar.gz.sha256
+	if [ -z "$expected_sha" ]; then
+		warn "No SHA256 checksum published for this release; integrity will not be verified."
 	fi
 
 	log "Downloading Asterisk artifact..."
 	DOWNLOAD_SUCCESS=0
 	for attempt in {1..3}; do
 		if wget --show-progress -O /tmp/asterisk.tar.gz "$ASTERISK_ARTIFACT_URL"; then
-			if tar -tzf /tmp/asterisk.tar.gz > /dev/null 2>&1; then
+			if [ -n "$expected_sha" ] && [ "$(sha256sum /tmp/asterisk.tar.gz | awk '{print $1}')" != "$expected_sha" ]; then
+				warn "SHA256 checksum MISMATCH — refusing this artifact. Attempt $attempt/3"
+				rm -f /tmp/asterisk.tar.gz
+			elif tar -tzf /tmp/asterisk.tar.gz > /dev/null 2>&1; then
 				DOWNLOAD_SUCCESS=1
-				log "Asterisk artifact downloaded and verified successfully."
+				if [ -n "$expected_sha" ]; then
+					log "Asterisk artifact downloaded and SHA256-verified successfully."
+				else
+					log "Asterisk artifact downloaded (validity-checked; no checksum available)."
+				fi
 				break
 			else
 				warn "Downloaded file is corrupted. Attempt $attempt/3"
@@ -464,7 +487,7 @@ download_asterisk_artifact() {
 	done
 
 	if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
-		error "Failed to download Asterisk artifact after 3 attempts."
+		error "Failed to download a valid Asterisk artifact after 3 attempts."
 	fi
 }
 
