@@ -3,15 +3,15 @@
 # ============================================================================
 # PROJECT:   FreePBX 17 ARM64 Installation Script (Asterisk 22 LTS)
 # LICENSE:   Apache-2.0
-# REPO:      https://github.com/slythel2/freepbx-arm64-install-test
+# REPO:      https://github.com/slythel2/freepbx-arm64-install
 # ============================================================================
 
 set -e
-SCRIPTVER="0.7.0"
+SCRIPTVER="1.0.0"
 
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
-REPO_NAME="freepbx-arm64-install-test"
+REPO_NAME="freepbx-arm64-install"
 REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/1.0/asterisk-22-current-arm64-debian12-v2.tar.gz"
 

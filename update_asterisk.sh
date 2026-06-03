@@ -9,7 +9,7 @@ set -e
 
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
-REPO_NAME="freepbx-arm64-install-test"
+REPO_NAME="freepbx-arm64-install"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/1.0/asterisk-22-current-arm64-debian12-v2.tar.gz"
 
 LOG_FOLDER="/var/log/pbx"

@@ -9,7 +9,7 @@ This is the ARM64 equivalent of Sangoma's official [sng_freepbx_debian_install](
 Requires a clean **Debian 12 (Bookworm) ARM64** installation and root access.
 
 ```bash
-wget https://raw.githubusercontent.com/slythel2/freepbx-arm64-install-test/refs/heads/main/install.sh
+wget https://raw.githubusercontent.com/slythel2/freepbx-arm64-install/refs/heads/main/install.sh
 chmod +x install.sh
 ./install.sh
 ```
@@ -22,7 +22,7 @@ The installer includes an update script with automatic backup and rollback:
 update_asterisk.sh
 ```
 
-Pre-compiled Asterisk binaries are built on native ARM64 GitHub Actions runners and published as [GitHub Releases](https://github.com/slythel2/freepbx-arm64-install-test/releases). The updater downloads the latest release, backs up the current installation, deploys the new binaries, and automatically rolls back if the health check fails.
+Pre-compiled Asterisk binaries are built on native ARM64 GitHub Actions runners and published as [GitHub Releases](https://github.com/slythel2/freepbx-arm64-install/releases). The updater downloads the latest release, backs up the current installation, deploys the new binaries, and automatically rolls back if the health check fails.
 
 ## CLI Flags
 
