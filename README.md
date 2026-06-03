@@ -35,7 +35,6 @@ Pre-compiled Asterisk binaries are built on native ARM64 GitHub Actions runners 
 
 * **One-click install**: all dependencies are handled automatically
 * **Fast deployment**: uses pre-compiled Asterisk 22 artifacts (no on-device compilation)
-* **Security**: Fail2ban with PJSIP + DDoS jails, Apache hardening, Trixie upgrade protection
 * **Update script**: Asterisk 22 updater script with backup, health check, and automatic rollback
 
 ## Access
