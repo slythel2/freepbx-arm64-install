@@ -993,7 +993,7 @@ main() {
 
 	echo -e "${GREEN}========================================================${NC}"
 	echo -e "${GREEN}            FREEPBX INSTALLATION COMPLETE!              ${NC}"
-	echo -e "${GREEN}           Duration: ${execution_time}s (~$(( execution_time / 60 )) min)    ${NC}"
+	echo -e "${GREEN}               Duration: ${execution_time}s (~$(( execution_time / 60 )) min)    ${NC}"
 	echo -e "${GREEN}========================================================${NC}"
 
 	exit 0
