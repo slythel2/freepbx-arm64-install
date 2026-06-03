@@ -129,10 +129,10 @@ fi
 echo ">>> [BUILDER] Detected Asterisk version: $REAL_VERSION"
 echo "$REAL_VERSION" > /tmp/asterisk_version.txt
 
-# --- 4b. PATCH: Fix pjproject for GCC 12+ on aarch64 ---
+# Fix pjproject for GCC 12+ on aarch64
 # Asterisk's bundled pjproject may fail because config_site.h includes system
 # headers (via asterisk_malloc_debug.h) before PJ_DECL is defined in config.h.
-# This prepends forward macro definitions. Safe & idempotent.
+# This prepends forward macro definitions.
 PJCFG="$BUILD_DIR/third-party/pjproject/source/pjlib/include/pj/config_site.h"
 if [ -f "$PJCFG" ]; then
     if ! grep -q "PJ_DECL_COMPAT_FWD" "$PJCFG"; then

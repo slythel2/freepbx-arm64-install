@@ -99,7 +99,7 @@ echo -e "${GREEN}========================================================${NC}"
 echo -e "${GREEN}          ASTERISK 22 UPDATER (with Rollback)           ${NC}"
 echo -e "${GREEN}========================================================${NC}"
 
-log "Starting Asterisk 22 Robust Update with Rollback Protection..."
+log "Starting Asterisk 22 update..."
 
 # ============================================================================
 # VERSION CHECK
@@ -215,16 +215,14 @@ if [ ! -f /etc/asterisk/asterisk.conf ]; then
 fi
 
 # ============================================================================
-# DOWNLOAD (before stopping Asterisk to minimize outage window)
+# DOWNLOAD
 # ============================================================================
 
 message "Downloading Asterisk update artifact..."
 
 rm -rf "$STAGE_DIR" && mkdir -p "$STAGE_DIR"
 
-# Fetch the published SHA256 (if any) to verify integrity before deploying
-# binaries as root. Older releases without a checksum fall back to a
-# gzip-validity check.
+# Fetch the published SHA256 to verify integrity before deploying
 EXPECTED_SHA=""
 if [ -n "${SHA_URL:-}" ] && wget -q -O /tmp/asterisk_update.tar.gz.sha256 "$SHA_URL"; then
 	EXPECTED_SHA=$(awk '{print $1}' /tmp/asterisk_update.tar.gz.sha256)
@@ -262,12 +260,12 @@ if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
 fi
 
 # ============================================================================
-# GRACEFUL STOP (after successful download — outage starts here)
+# GRACEFUL STOP
 # ============================================================================
 
 message "Stopping Asterisk service..."
 if systemctl is-active --quiet asterisk 2>/dev/null; then
-	# Try graceful shutdown first (gives active calls time to end)
+	# Try graceful shutdown first
 	asterisk -rx "core stop gracefully" >> "$LOG_FILE" 2>&1 || true
 	for i in {1..15}; do
 		if ! systemctl is-active --quiet asterisk 2>/dev/null; then
@@ -398,7 +396,7 @@ if command -v fwconsole &> /dev/null; then
 	fwconsole reload >> "$LOG_FILE" 2>&1 || warn "FreePBX reload had warnings"
 fi
 
-# Clean up old backups (keep last 3)
+# Clean up old backups (keeps last 3)
 if [ -d "$BACKUP_BASE" ]; then
 	BACKUP_COUNT=$(ls -1d "$BACKUP_BASE"/backup_* 2>/dev/null | wc -l)
 	if [ "$BACKUP_COUNT" -gt 3 ]; then

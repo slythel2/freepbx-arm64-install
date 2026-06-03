@@ -16,10 +16,8 @@ REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/1.0/asterisk-22-current-arm64-debian12-v2.tar.gz"
 
 DB_ROOT_PASS=$(openssl rand -base64 18 | tr -d '/+=')
-# Distinct credential for the FreePBX application DB user. Must NOT equal the
-# MariaDB root password: FreePBX stores this in /etc/freepbx.conf (readable by
-# the asterisk/web user), so reusing the root password would let a web-tier
-# compromise escalate to DB superuser.
+# Distinct credential for the FreePBX application DB user.
+# FreePBX stores this in /etc/freepbx.conf (readable by the asterisk/web user)
 DB_ASTERISK_PASS=$(openssl rand -base64 18 | tr -d '/+=')
 LOG_FOLDER="/var/log/pbx"
 LOG_FILE="${LOG_FOLDER}/freepbx17-install-$(date '+%Y.%m.%d-%H.%M.%S').log"
@@ -453,9 +451,8 @@ download_asterisk_artifact() {
 		ASTERISK_ARTIFACT_URL="$LATEST_URL"
 	fi
 
-	# Fetch the published SHA256 (if any) so we can verify integrity BEFORE
-	# extracting attacker-influenceable content as root. If the release has no
-	# checksum asset (older releases) we fall back to a gzip-validity check.
+	# Fetch the published SHA256 so we can verify integrity before extracting as root
+	# If the release has no checksum asset, fall back to a gzip-validity check
 	local expected_sha=""
 	if [ -n "$sha_url" ] && wget -q -O /tmp/asterisk.tar.gz.sha256 "$sha_url"; then
 		expected_sha=$(awk '{print $1}' /tmp/asterisk.tar.gz.sha256)
