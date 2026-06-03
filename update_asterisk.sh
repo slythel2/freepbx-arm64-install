@@ -409,6 +409,6 @@ fi
 
 echo -e "${GREEN}========================================================${NC}"
 echo -e "${GREEN}     ASTERISK UPDATE COMPLETED SUCCESSFULLY!            ${NC}"
-echo -e "${GREEN}            Version: $NEW_VERSION                       ${NC}"
+echo -e "${GREEN}               Version: $NEW_VERSION                       ${NC}"
 echo -e "${GREEN}========================================================${NC}"
 exit 0
