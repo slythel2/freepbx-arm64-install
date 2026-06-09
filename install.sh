@@ -13,7 +13,7 @@ SCRIPTVER="1.0.0"
 REPO_OWNER="slythel2"
 REPO_NAME="freepbx-arm64-install"
 REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
-FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/1.0/asterisk-22-current-arm64-debian12-v2.tar.gz"
+FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/asterisk-22.9.0-build8/asterisk-22-current-arm64-debian12.tar.gz"
 
 DB_ROOT_PASS=$(openssl rand -base64 18 | tr -d '/+=')
 # Distinct credential for the FreePBX application DB user.

@@ -10,7 +10,7 @@ set -e
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
 REPO_NAME="freepbx-arm64-install"
-FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/1.0/asterisk-22-current-arm64-debian12-v2.tar.gz"
+FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/asterisk-22.9.0-build8/asterisk-22-current-arm64-debian12.tar.gz"
 
 LOG_FOLDER="/var/log/pbx"
 LOG_FILE="${LOG_FOLDER}/update_asterisk-$(date '+%Y.%m.%d-%H.%M.%S').log"
