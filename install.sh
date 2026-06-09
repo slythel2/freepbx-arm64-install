@@ -102,8 +102,8 @@ errorHandler() {
 	echo -e "${RED}║ Exit:    ${NC}${err_code}"
 	echo -e "${RED}║ Command: ${NC}${err_cmd}"
 	echo -e "${RED}╠══════════════════════════════════════════════════════════╣${NC}"
-	echo -e "${RED}║ Last 20 log entries:${NC}"
-	tail -n 20 "$LOG_FILE" 2>/dev/null | while IFS= read -r line; do
+	echo -e "${RED}║ Last 40 log entries:${NC}"
+	tail -n 40 "$LOG_FILE" 2>/dev/null | while IFS= read -r line; do
 		echo -e "${RED}║${NC}  $line"
 	done
 	echo -e "${RED}╠══════════════════════════════════════════════════════════╣${NC}"
