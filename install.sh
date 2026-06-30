@@ -12,7 +12,7 @@ SCRIPTVER="1.0.0"
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
 REPO_NAME="freepbx-arm64-install"
-REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
+REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/freepbx-arm64-raspberry"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/asterisk-22-current-arm64-debian12.tar.gz"
 
 DB_ROOT_PASS=$(openssl rand -base64 18 | tr -d '/+=')
@@ -36,6 +36,11 @@ NC='\033[0m'
 # Global state
 currentStep=""
 STEP_NUM=0
+
+# Hardware detection (populated by detect_hardware)
+IS_RASPBERRY_PI=false
+PI_MODEL=""
+TOTAL_RAM_MB=0
 
 # CLI flags (defaults)
 skipversion=false
@@ -262,6 +267,79 @@ check_architecture() {
 	message "Architecture check passed: $ARCH"
 }
 
+detect_hardware() {
+	setCurrentStep "Detecting hardware platform..."
+
+	TOTAL_RAM_MB=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 ))
+	log "System RAM: ${TOTAL_RAM_MB}MB"
+
+	# device-tree is the most reliable way to detect a Pi
+	if [ -f /proc/device-tree/model ]; then
+		PI_MODEL=$(tr -d '\0' < /proc/device-tree/model)
+		if echo "$PI_MODEL" | grep -qi "raspberry pi"; then
+			IS_RASPBERRY_PI=true
+			message "Detected: $PI_MODEL (${TOTAL_RAM_MB}MB RAM)"
+		fi
+	fi
+
+	if [ "$IS_RASPBERRY_PI" = false ]; then
+		log "Not a Raspberry Pi, using standard config."
+	fi
+
+	if [ "$TOTAL_RAM_MB" -lt 1024 ]; then
+		warn "Less than 1GB RAM (${TOTAL_RAM_MB}MB). FreePBX may not run reliably."
+	elif [ "$TOTAL_RAM_MB" -lt 2048 ]; then
+		warn "Less than 2GB RAM (${TOTAL_RAM_MB}MB). Performance may be limited."
+	fi
+}
+
+configure_swap() {
+	setCurrentStep "Configuring swap space..."
+
+	local current_swap_kb
+	current_swap_kb=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
+	if [ "$current_swap_kb" -ge 524288 ]; then
+		log "Swap already configured (${current_swap_kb}KB), skipping."
+		return
+	fi
+
+	# 1GB swap if RAM <= 2GB, 2GB if RAM <= 4GB, skip otherwise
+	local swap_size_mb=0
+	if [ "$TOTAL_RAM_MB" -le 2048 ]; then
+		swap_size_mb=1024
+	elif [ "$TOTAL_RAM_MB" -le 4096 ]; then
+		swap_size_mb=2048
+	else
+		log "System has ${TOTAL_RAM_MB}MB RAM, swap not needed."
+		return
+	fi
+
+	# make sure we have enough disk space (swap + 1GB headroom)
+	local avail_kb
+	avail_kb=$(df -k / | awk 'NR==2 {print $4}')
+	local swap_size_kb=$((swap_size_mb * 1024))
+	if [ "$avail_kb" -lt $((swap_size_kb + 1048576)) ]; then
+		warn "Not enough disk space for ${swap_size_mb}MB swap. Skipping."
+		return
+	fi
+
+	message "Creating ${swap_size_mb}MB swap file (system has ${TOTAL_RAM_MB}MB RAM)..."
+	dd if=/dev/zero of=/swapfile bs=1M count=$swap_size_mb status=progress 2>>"$LOG_FILE"
+	chmod 600 /swapfile
+	mkswap /swapfile >> "$LOG_FILE"
+	swapon /swapfile
+
+	if ! grep -q '/swapfile' /etc/fstab; then
+		echo '/swapfile none swap sw 0 0' >> /etc/fstab
+	fi
+
+	# low swappiness to reduce SD card wear
+	echo 'vm.swappiness=10' > /etc/sysctl.d/99-swap.conf
+	sysctl vm.swappiness=10
+
+	log "Swap configured: ${swap_size_mb}MB, swappiness=10"
+}
+
 setup_logging() {
 	mkdir -p "${LOG_FOLDER}"
 	touch "${LOG_FILE}"
@@ -269,22 +347,33 @@ setup_logging() {
 }
 
 download_config_files() {
-	setCurrentStep "Downloading configuration files from repository..."
+	setCurrentStep "Loading configuration files..."
 	mkdir -p "$FILES_DIR"
+
+	# check if we're running from a local copy with files/ next to the script
+	local SCRIPT_DIR
+	SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	local LOCAL_FILES_DIR="${SCRIPT_DIR}/files"
 
 	local config_files=(
 		"asterisk.conf" "asterisk.service"
 		"mariadb-tmpfiles.conf" "99-freepbx.cnf" "index.php"
 		"asterisk-pjsip.conf" "asterisk-jail.local" "99-pbx-status"
-		"odbcinst.ini.tpl" "odbc.ini.tpl"
+		"odbcinst.ini.tpl" "odbc.ini.tpl" "sysctl-asterisk.conf"
+		"dbus-fix.conf"
 	)
 
 	for f in "${config_files[@]}"; do
-		if ! wget -q "${REPO_RAW}/files/${f}" -O "${FILES_DIR}/${f}"; then
-			error "Failed to download config file: ${f}"
+		if [ -f "${LOCAL_FILES_DIR}/${f}" ]; then
+			cp "${LOCAL_FILES_DIR}/${f}" "${FILES_DIR}/${f}"
+			log "Loaded ${f} from local files/"
+		elif wget -q "${REPO_RAW}/files/${f}" -O "${FILES_DIR}/${f}"; then
+			log "Downloaded ${f} from GitHub"
+		else
+			error "Failed to get config file: ${f}"
 		fi
 	done
-	log "All configuration files downloaded successfully."
+	log "All configuration files loaded."
 }
 
 system_upgrade() {
@@ -357,23 +446,31 @@ install_dependencies() {
 configure_php() {
 	setCurrentStep "Configuring PHP settings"
 
-	# detect php version
 	PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
 	message "Detected PHP version: ${PHP_VER}"
 
+	# scale php memory limits based on available RAM
+	local php_memory_limit="512M"
+	local opcache_memory=128
+	if [ "$TOTAL_RAM_MB" -le 2048 ]; then
+		php_memory_limit="128M"
+		opcache_memory=64
+		message "Low-RAM mode: PHP memory_limit=${php_memory_limit}, opcache=${opcache_memory}MB"
+	elif [ "$TOTAL_RAM_MB" -le 4096 ]; then
+		php_memory_limit="256M"
+		opcache_memory=96
+	fi
+
 	for INI in /etc/php/${PHP_VER}/apache2/php.ini /etc/php/${PHP_VER}/cli/php.ini; do
 		if [ -f "$INI" ]; then
-			# performance
-			sed -i 's/^memory_limit = .*/memory_limit = 512M/' "$INI"
+			sed -i "s/^memory_limit = .*/memory_limit = ${php_memory_limit}/" "$INI"
 			sed -i 's/^upload_max_filesize = .*/upload_max_filesize = 120M/' "$INI"
 			sed -i 's/^post_max_size = .*/post_max_size = 120M/' "$INI"
 			sed -i 's/^;date.timezone =.*/date.timezone = UTC/' "$INI"
-			# opcache settings
 			sed -i 's/^;opcache.enable=.*/opcache.enable=1/' "$INI"
-			sed -i 's/^;opcache.memory_consumption=.*/opcache.memory_consumption=128/' "$INI"
+			sed -i "s/^;opcache.memory_consumption=.*/opcache.memory_consumption=${opcache_memory}/" "$INI"
 			sed -i 's/^;opcache.interned_strings_buffer=.*/opcache.interned_strings_buffer=8/' "$INI"
 			sed -i 's/^;opcache.max_accelerated_files=.*/opcache.max_accelerated_files=10000/' "$INI"
-			# mysql socket
 			sed -i "s|^;*pdo_mysql.default_socket.*|pdo_mysql.default_socket = /run/mysqld/mysqld.sock|" "$INI"
 			sed -i "s|^;*mysqli.default_socket.*|mysqli.default_socket = /run/mysqld/mysqld.sock|" "$INI"
 			sed -i "s|^;*mysql.default_socket.*|mysql.default_socket = /run/mysqld/mysqld.sock|" "$INI"
@@ -387,21 +484,22 @@ install_ioncube_loader() {
 	setCurrentStep "Installing ionCube Loader for PHP..."
 	IONCUBE_DIR="/tmp/ioncube_install"
 	rm -rf "$IONCUBE_DIR" && mkdir -p "$IONCUBE_DIR"
-	cd "$IONCUBE_DIR"
 
-	if wget -q https://downloads.ioncube.com/loader_downloads/ioncube_loaders_lin_aarch64.tar.gz; then
-		tar xzf ioncube_loaders_lin_aarch64.tar.gz
+	PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
+	local arch=$(uname -m)
 
-		PHP_EXT_DIR=$(php -i 2>/dev/null | grep "^extension_dir" | awk '{print $3}')
-		if [ -z "$PHP_EXT_DIR" ]; then
-			PHP_EXT_DIR="/usr/lib/php/20220829"
-		fi
+	if [[ "$arch" == "aarch64" ]]; then
+		local ioncube_url="https://downloads.ioncube.com/loader_downloads/ioncube_loaders_lin_aarch64.tar.gz"
+	elif [[ "$arch" == "x86_64" ]]; then
+		local ioncube_url="https://downloads.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.tar.gz"
+	else
+		warn "Unsupported architecture for ionCube: $arch"
+		return
+	fi
 
-		PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
-		# ensure php dirs exist
-		mkdir -p "/etc/php/${PHP_VER}/mods-available"
-		mkdir -p "/etc/php/${PHP_VER}/apache2/conf.d"
-		mkdir -p "/etc/php/${PHP_VER}/cli/conf.d"
+	cd /tmp
+	if wget -q "$ioncube_url"; then
+		tar xzf "ioncube_loaders_lin_${arch}.tar.gz"
 		if [ -f "ioncube/ioncube_loader_lin_${PHP_VER}.so" ]; then
 			cp ioncube/ioncube_loader_lin_${PHP_VER}.so "$PHP_EXT_DIR/"
 			echo "zend_extension = $PHP_EXT_DIR/ioncube_loader_lin_${PHP_VER}.so" > "/etc/php/${PHP_VER}/mods-available/ioncube.ini"
@@ -421,8 +519,22 @@ install_ioncube_loader() {
 
 
 # ============================================================================
-# ASTERISK USER & DOWNLOAD
+# NETWORK & ASTERISK USER
 # ============================================================================
+
+configure_networkmanager() {
+	setCurrentStep "Configuring NetworkManager..."
+	# skip if NM isn't installed (VPS/cloud images typically use systemd-networkd)
+	if systemctl list-unit-files NetworkManager.service 2>/dev/null | grep -q NetworkManager; then
+		log "NetworkManager found, applying dbus-fix override"
+		mkdir -p /etc/systemd/system/NetworkManager.service.d
+		cp "${FILES_DIR}/dbus-fix.conf" /etc/systemd/system/NetworkManager.service.d/dbus-fix.conf
+		systemctl daemon-reload
+		log "override installed at /etc/systemd/system/NetworkManager.service.d/dbus-fix.conf"
+	else
+		log "NetworkManager not installed, skipping dbus-fix"
+	fi
+}
 
 create_asterisk_user() {
 	setCurrentStep "Configuring Asterisk user..."
@@ -513,6 +625,39 @@ configure_asterisk_service() {
 	cp "${FILES_DIR}/asterisk.service" /etc/systemd/system/asterisk.service
 	systemctl daemon-reload
 	systemctl enable asterisk mariadb apache2
+}
+
+apply_production_tuning() {
+	setCurrentStep "Applying production tuning..."
+
+	cp "${FILES_DIR}/sysctl-asterisk.conf" /etc/sysctl.d/99-asterisk.conf
+
+	# only disable SIP ALG if the kernel module is loaded
+	if lsmod | grep -q nf_conntrack; then
+		echo "net.netfilter.nf_conntrack_helper = 0" >> /etc/sysctl.d/99-asterisk.conf
+	else
+		log "nf_conntrack not loaded, skipping SIP ALG disable"
+	fi
+
+	sysctl --system >> "$LOG_FILE" 2>&1 || warn "Some sysctl settings could not be applied"
+
+	# reduce network buffers on low-RAM Pi boards
+	if [ "$IS_RASPBERRY_PI" = true ] && [ "$TOTAL_RAM_MB" -le 2048 ]; then
+		log "Reducing network buffers for low-RAM Pi"
+		sysctl -w net.core.rmem_max=4194304 2>/dev/null || true
+		sysctl -w net.core.wmem_max=4194304 2>/dev/null || true
+	fi
+
+	cat > /etc/security/limits.d/asterisk.conf <<'EOF'
+asterisk soft nofile 65536
+asterisk hard nofile 65536
+asterisk soft nproc  8192
+asterisk hard nproc  8192
+asterisk soft core   unlimited
+asterisk hard core   unlimited
+EOF
+
+	log "Production tuning applied."
 }
 
 # ============================================================================
@@ -693,6 +838,10 @@ install_freepbx() {
 	tar xfz freepbx-17.0-latest.tgz
 	cd freepbx
 	log "FreePBX extracted and ready."
+
+	# Fix timeout for slow ARM boards (default 180s is too low for Raspberry Pi)
+	log "Patching FreePBX installer timeout..."
+	sed -i 's/setTimeout($timeout)/setTimeout(3600)/g' installlib/installcommand.class.php 2>/dev/null || true
 
 	log "Verifying MySQL connection..."
 	if ! mysql -u asterisk -p"$DB_ASTERISK_PASS" -e "SELECT 1;" &> /dev/null; then
@@ -949,13 +1098,16 @@ main() {
 	# pre-flight
 	check_disk_space "/" 5 "root filesystem"
 	check_architecture
+	detect_hardware
 	check_script_version
 	block_trixie_upgrade
 
 	# install
 	download_config_files
 	system_upgrade
+	configure_swap
 	install_dependencies
+	configure_networkmanager
 	configure_php
 	install_ioncube_loader
 
@@ -963,6 +1115,7 @@ main() {
 	download_asterisk_artifact
 	install_asterisk_artifact
 	configure_asterisk_service
+	apply_production_tuning
 
 	setup_mariadb
 	configure_database

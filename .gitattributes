@@ -1,1 +1,2 @@
 *.sh text eol=lf
+files/* text eol=lf

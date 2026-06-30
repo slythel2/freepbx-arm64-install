@@ -9,7 +9,7 @@ This is the ARM64 equivalent of Sangoma's official [sng_freepbx_debian_install](
 Requires a clean **Debian 12 (Bookworm) ARM64** installation and root access.
 
 ```bash
-wget https://raw.githubusercontent.com/slythel2/freepbx-arm64-install/refs/heads/main/install.sh
+wget https://raw.githubusercontent.com/slythel2/freepbx-arm64-install/refs/heads/freepbx-arm64-raspberry/install.sh
 chmod +x install.sh
 ./install.sh
 ```

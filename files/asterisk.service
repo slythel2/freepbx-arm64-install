@@ -1,12 +1,35 @@
 [Unit]
 Description=Asterisk PBX
 After=network.target mariadb.service
+Wants=mariadb.service
+
 [Service]
 Type=simple
 User=asterisk
 Group=asterisk
 ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf
-Restart=always
+ExecStop=/usr/sbin/asterisk -rx "core stop gracefully"
+ExecReload=/usr/sbin/asterisk -rx "core reload"
+Restart=on-failure
 RestartSec=5
+
+# avoid boot loops
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
+# don't hang on reboot
+TimeoutStopSec=30
+
+# resource limits
+LimitNOFILE=65536
+LimitNPROC=8192
+LimitCORE=infinity
+
+# hardening
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
+
 [Install]
 WantedBy=multi-user.target
