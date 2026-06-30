@@ -1,12 +1,13 @@
-# FreePBX 17 ARM64 Installation Script
+# FreePBX 17 Raspberry ARM64 Installation Script
 
-An automated installer for **Asterisk 22 LTS** and **FreePBX 17** on **Debian 12 ARM64** systems.
+An automated installer for **Asterisk 22 LTS** and **FreePBX 17** on **Debian 12 ARM64** Raspberry PI Systems.
+I strongly suggest using it with Raspberry Pi OS Debian Bookworm **Lite**. (Legacy 64 bit) 
 
-This is the ARM64 equivalent of Sangoma's official [sng_freepbx_debian_install](https://github.com/FreePBX/sng_freepbx_debian_install) (which only supports x86_64).
+This is the ARM64 Raspberry Pi equivalent of Sangoma's official [sng_freepbx_debian_install](https://github.com/FreePBX/sng_freepbx_debian_install) (which only supports x86_64).
 
 ## Installation
 
-Requires a clean **Debian 12 (Bookworm) ARM64** installation and root access.
+Requires a clean **Raspberry Pi OS Debian Bookworm Lite** installation and root access.
 
 ```bash
 wget https://raw.githubusercontent.com/slythel2/freepbx-arm64-install/refs/heads/freepbx-arm64-raspberry/install.sh
