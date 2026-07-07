@@ -4,6 +4,8 @@ An automated installer for **Asterisk 22 LTS** and **FreePBX 17** on **Debian 12
 
 This is the ARM64 equivalent of Sangoma's official [sng_freepbx_debian_install](https://github.com/FreePBX/sng_freepbx_debian_install) (which only supports x86_64).
 
+For the **Raspberry Pi** version check **[this branch.](https://github.com/slythel2/freepbx-arm64-install/tree/freepbx-arm64-raspberry)**
+
 ## Installation
 
 Requires a clean **Debian 12 (Bookworm) ARM64** installation and root access.
