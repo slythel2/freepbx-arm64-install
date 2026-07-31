@@ -273,7 +273,7 @@ download_config_files() {
 	mkdir -p "$FILES_DIR"
 
 	local config_files=(
-		"asterisk.conf" "asterisk.service"
+		"asterisk.conf" "asterisk.service" "freepbx.service"
 		"mariadb-tmpfiles.conf" "99-freepbx.cnf" "index.php"
 		"asterisk-pjsip.conf" "asterisk-jail.local" "99-pbx-status"
 		"odbcinst.ini.tpl" "odbc.ini.tpl"
@@ -511,8 +511,12 @@ configure_asterisk_service() {
 	setCurrentStep "Configuring Asterisk systemd service"
 
 	cp "${FILES_DIR}/asterisk.service" /etc/systemd/system/asterisk.service
+
+	# FreePBX needs its own service to start PM2 processes on boot
+	cp "${FILES_DIR}/freepbx.service" /etc/systemd/system/freepbx.service
+
 	systemctl daemon-reload
-	systemctl enable asterisk mariadb apache2
+	systemctl enable asterisk mariadb apache2 freepbx
 }
 
 # ============================================================================
@@ -794,6 +798,11 @@ install_freepbx_modules() {
 
 	log "All modules installed. Reloading FreePBX..."
 	fwconsole reload || true
+
+	# make sure PM2 processes are running and systemd knows about it
+	log "Starting FreePBX PM2 services..."
+	fwconsole start -q || true
+	systemctl start freepbx || true
 }
 
 # ============================================================================
@@ -858,7 +867,7 @@ install_updater_script() {
 check_services() {
 	setCurrentStep "Checking services status"
 
-	services=("asterisk" "mariadb" "apache2" "fail2ban")
+	services=("asterisk" "freepbx" "mariadb" "apache2" "fail2ban")
 	for service in "${services[@]}"; do
 		service_status=$(systemctl is-active "$service")
 		if [[ "$service_status" != "active" ]]; then

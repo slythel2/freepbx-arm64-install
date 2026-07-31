@@ -1,0 +1,14 @@
+[Unit]
+Description=FreePBX VoIP Server
+After=asterisk.service mariadb.service network-online.target
+Wants=network-online.target
+Requires=asterisk.service mariadb.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/fwconsole start -q
+ExecStop=/usr/sbin/fwconsole stop -q
+
+[Install]
+WantedBy=multi-user.target
