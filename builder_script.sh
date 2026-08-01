@@ -34,7 +34,7 @@ apt-get install -y -qq --no-install-recommends \
     libncurses5-dev libncursesw5-dev libxml2-dev libsqlite3-dev sqlite3 \
     libssl-dev uuid-dev libjansson-dev libedit-dev libxslt1-dev \
     libicu-dev libsrtp2-dev libopus-dev libopusfile-dev libvorbis-dev libspeex-dev \
-    libspeexdsp-dev libgsm1-dev portaudio19-dev \
+    libspeexdsp-dev libgsm1-dev portaudio19-dev libspandsp-dev \
     unixodbc unixodbc-dev odbcinst libltdl-dev libsystemd-dev \
     libasound2-dev libjwt-dev liburiparser-dev liblua5.4-dev \
     python3 python3-dev python-is-python3 procps ca-certificates gnupg
@@ -180,6 +180,8 @@ menuselect/menuselect --enable CORE-SOUNDS-EN-GSM menuselect.makeopts
 menuselect/menuselect --disable BUILD_NATIVE menuselect.makeopts
 # Enable the open-source Opus transcoding module we patched in earlier
 menuselect/menuselect --enable codec_opus_open_source menuselect.makeopts
+# Enable spandsp fax engine (needs libspandsp-dev installed above)
+menuselect/menuselect --enable res_fax_spandsp menuselect.makeopts
 
 # --- 6. COMPILE ---
 echo ">>> [BUILDER] Checking available disk space before compilation..."

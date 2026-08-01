@@ -322,7 +322,7 @@ install_dependencies() {
 		php-mysql php-soap php-xml php-intl php-zip php-bcmath \
 		php-ldap php-pear libapache2-mod-php \
 		libxml2 libsqlite3-0 libjansson4 libedit2 libxslt1.1 \
-		libopus0 libvorbis0a libspeex1 libspeexdsp1 libgsm1 \
+		libopus0 libvorbis0a libspeex1 libspeexdsp1 libgsm1 libspandsp2 \
 		unixodbc unixodbc-dev odbcinst libltdl7 libicu-dev \
 		libsrtp2-1 libportaudio2 liburiparser1 nodejs npm fail2ban python3-systemd \
 		ffmpeg lame mpg123 postfix
