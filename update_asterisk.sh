@@ -9,8 +9,8 @@ set -e
 
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
-REPO_NAME="freepbx-arm64-install"
-FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/asterisk-22-current-arm64-debian12.tar.gz"
+REPO_NAME="freepbx-arm64-install-test"
+FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/1.0/asterisk-22-current-arm64-debian12-v2.tar.gz"
 
 LOG_FOLDER="/var/log/pbx"
 LOG_FILE="${LOG_FOLDER}/update_asterisk-$(date '+%Y.%m.%d-%H.%M.%S').log"
@@ -212,6 +212,20 @@ mkdir -p /var/run/asterisk /var/log/asterisk /var/lib/asterisk /var/spool/asteri
 
 if [ ! -f /etc/asterisk/asterisk.conf ]; then
 	warn "asterisk.conf missing! Ensure FreePBX is correctly installed first."
+fi
+
+# Installs up to now shipped minmemfree = 256. Asterisk measures that against free
+# RAM, which on Linux stays low because the kernel uses the rest as page cache, so
+# on any box with some uptime the watermark trips and every new call is refused.
+# There is no visible error: originate reports success, no channel is created, and
+# the only clue is one WARNING from pbx.c. Asterisk is stopped further down for the
+# update, so fixing it here costs nothing extra.
+if [ -f /etc/asterisk/asterisk.conf ] && \
+   grep -qE '^[[:space:]]*minmemfree[[:space:]]*=' /etc/asterisk/asterisk.conf; then
+	sed -i -E 's/^([[:space:]]*minmemfree[[:space:]]*=.*)$/; \1  ; disabled by update_asterisk.sh, it refuses calls on a healthy box/' \
+		/etc/asterisk/asterisk.conf
+	message "Disabled minmemfree in asterisk.conf: it was refusing all new calls."
+	message "The original is in the backup at $BACKUP_DIR/config/asterisk.conf"
 fi
 
 # ============================================================================
