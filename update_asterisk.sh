@@ -9,6 +9,9 @@ set -e
 
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
+
+# releases live here, nowhere else. do not repoint at a private repo, wget gets
+# 404 on both the api and the download and the script just gives up
 REPO_NAME="freepbx-arm64-install"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/asterisk-22-current-arm64-debian12.tar.gz"
 
@@ -114,13 +117,14 @@ fi
 
 # Fetch current installed version
 CURRENT_VERSION="unknown"
-if command -v asterisk &> /dev/null && systemctl is-active --quiet asterisk 2>/dev/null; then
+# pgrep, not systemctl: fwconsole starts asterisk outside the unit
+if command -v asterisk &> /dev/null && pgrep -x asterisk > /dev/null 2>&1; then
 	CURRENT_VERSION=$(asterisk -rx "core show version" 2>/dev/null | grep -oP 'Asterisk \K[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
 fi
 message "Current installed version: ${CURRENT_VERSION}"
 
 # Fetch latest release info
-RELEASE_JSON=$(curl -s "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest")
+RELEASE_JSON=$(curl -s --max-time 30 "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest")
 LATEST_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select((.name | contains("asterisk")) and (.name | endswith(".tar.gz"))) | .browser_download_url' | head -n 1)
 SHA_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select((.name | contains("asterisk")) and (.name | endswith(".sha256"))) | .browser_download_url' | head -n 1)
 RELEASE_TAG=$(echo "$RELEASE_JSON" | jq -r '.tag_name // empty')
@@ -128,7 +132,7 @@ RELEASE_TAG=$(echo "$RELEASE_JSON" | jq -r '.tag_name // empty')
 if [ -z "$LATEST_URL" ]; then
 	warn "Could not fetch latest release, using fallback URL."
 	ASTERISK_ARTIFACT_URL="$FALLBACK_ARTIFACT"
-	SHA_URL=""
+	SHA_URL="${FALLBACK_ARTIFACT}.sha256"
 else
 	log "Latest release found: $LATEST_URL (tag: ${RELEASE_TAG:-unknown})"
 	ASTERISK_ARTIFACT_URL="$LATEST_URL"
@@ -144,12 +148,16 @@ else
 		if [ "$CURRENT_VERSION" = "$AVAILABLE_VERSION" ]; then
 			echo -e "${GREEN}Asterisk is already at version ${CURRENT_VERSION}. No update needed.${NC}"
 			log "No update needed: installed=$CURRENT_VERSION, available=$AVAILABLE_VERSION"
-			read -p "Force update anyway? (y/N): " force_update
-			if [[ "$force_update" != "y" && "$force_update" != "Y" ]]; then
-				echo "Update cancelled."
-				exit 0
+			if [ "$DRY_RUN" != true ]; then
+				# no terminal means no
+				force_update=""
+				read -rp "Force update anyway? (y/N): " force_update || true
+				if [[ "$force_update" != "y" && "$force_update" != "Y" ]]; then
+					echo "Update cancelled."
+					exit 0
+				fi
+				message "User chose to force update."
 			fi
-			message "User chose to force update."
 		else
 			message "Update available: ${CURRENT_VERSION} -> ${AVAILABLE_VERSION}"
 		fi
@@ -195,7 +203,7 @@ for lib in /usr/lib/libasterisk*.so*; do
 	[ -f "$lib" ] && cp "$lib" "$BACKUP_DIR/libs/" 2>/dev/null || true
 done
 
-# Configuration (safety net — not overwritten by deploy, but saved just in case)
+# Configuration (safety net, not overwritten by deploy, but saved just in case)
 if [ -d /etc/asterisk ]; then
 	mkdir -p "$BACKUP_DIR/config"
 	cp -r /etc/asterisk/* "$BACKUP_DIR/config/" 2>/dev/null || true
@@ -214,12 +222,8 @@ if [ ! -f /etc/asterisk/asterisk.conf ]; then
 	warn "asterisk.conf missing! Ensure FreePBX is correctly installed first."
 fi
 
-# Installs up to now shipped minmemfree = 256. Asterisk measures that against free
-# RAM, which on Linux stays low because the kernel uses the rest as page cache, so
-# on any box with some uptime the watermark trips and every new call is refused.
-# There is no visible error: originate reports success, no channel is created, and
-# the only clue is one WARNING from pbx.c. Asterisk is stopped further down for the
-# update, so fixing it here costs nothing extra.
+# older installs shipped minmemfree = 256, which silently refuses every call once
+# the page cache grows. asterisk gets stopped further down anyway
 if [ -f /etc/asterisk/asterisk.conf ] && \
    grep -qE '^[[:space:]]*minmemfree[[:space:]]*=' /etc/asterisk/asterisk.conf; then
 	sed -i -E 's/^([[:space:]]*minmemfree[[:space:]]*=.*)$/; \1  ; disabled by update_asterisk.sh, it refuses calls on a healthy box/' \
@@ -248,7 +252,7 @@ DOWNLOAD_SUCCESS=0
 for attempt in {1..3}; do
 	if wget -q --show-progress -O /tmp/asterisk_update.tar.gz "$ASTERISK_ARTIFACT_URL"; then
 		if [ -n "$EXPECTED_SHA" ] && [ "$(sha256sum /tmp/asterisk_update.tar.gz | awk '{print $1}')" != "$EXPECTED_SHA" ]; then
-			warn "SHA256 checksum MISMATCH — refusing this artifact. Attempt $attempt/3"
+			warn "SHA256 checksum MISMATCH, refusing this artifact. Attempt $attempt/3"
 			rm -f /tmp/asterisk_update.tar.gz
 		elif tar -tzf /tmp/asterisk_update.tar.gz > /dev/null 2>&1; then
 			DOWNLOAD_SUCCESS=1
@@ -278,11 +282,13 @@ fi
 # ============================================================================
 
 message "Stopping Asterisk service..."
-if systemctl is-active --quiet asterisk 2>/dev/null; then
+# fwconsole runs asterisk under safe_asterisk, which would respawn it mid deploy
+pkill -x safe_asterisk 2>/dev/null || true
+if pgrep -x asterisk > /dev/null 2>&1; then
 	# Try graceful shutdown first
 	asterisk -rx "core stop gracefully" >> "$LOG_FILE" 2>&1 || true
 	for i in {1..15}; do
-		if ! systemctl is-active --quiet asterisk 2>/dev/null; then
+		if ! pgrep -x asterisk > /dev/null 2>&1; then
 			log "Asterisk stopped gracefully after ${i}x2 seconds."
 			break
 		fi
@@ -296,7 +302,8 @@ sleep 1
 
 if pgrep -x asterisk > /dev/null 2>&1; then
 	warn "Asterisk still running after graceful stop, forcing kill..."
-	pkill -9 asterisk 2>/dev/null || true
+	# -x, the pattern alone also matches this script's own name
+	pkill -9 -x asterisk 2>/dev/null || true
 	sleep 1
 fi
 
@@ -317,10 +324,7 @@ if [ -f "$STAGE_DIR/VERSION.txt" ]; then
 	fi
 fi
 
-# SAFETY: The tarball also contains sample configs (/etc/asterisk/) and data
-# files (/var/lib/asterisk/) from `make samples` and `make install`, but we
-# intentionally ONLY deploy binary + modules + libraries below.
-# User configurations in /etc/asterisk/ and FreePBX data MUST NOT be overwritten.
+# binary, modules and libraries only, the tarball's sample configs must not reach /etc/asterisk
 
 # Binary
 [ -f "$STAGE_DIR/usr/sbin/asterisk" ] && cp -f "$STAGE_DIR/usr/sbin/asterisk" /usr/sbin/
@@ -347,17 +351,27 @@ ldconfig
 # HEALTH CHECK
 # ============================================================================
 
+# stopping asterisk also stopped freepbx.service (Requires=), and with it ucp and fastagi
+start_freepbx() {
+	systemctl is-enabled --quiet freepbx 2>/dev/null || return 0
+	systemctl start freepbx >> "$LOG_FILE" 2>&1 \
+		|| warn "freepbx.service did not start, UCP and FastAGI are down. Run: systemctl start freepbx"
+}
+
 message "Starting Asterisk and performing health check..."
-systemctl start asterisk >> "$LOG_FILE" 2>&1
+# a failed start must reach the rollback below, not exit here
+systemctl reset-failed asterisk > /dev/null 2>&1 || true
+systemctl start asterisk >> "$LOG_FILE" 2>&1 || true
 sleep 5
 
 ASTERISK_HEALTHY=0
 NEW_VERSION="Unknown"
 for i in {1..10}; do
-	if systemctl is-active --quiet asterisk 2>/dev/null && asterisk -rx "core show version" &>/dev/null; then
+	# fully booted, the reload below needs the manager
+	if systemctl is-active --quiet asterisk 2>/dev/null && timeout 30 asterisk -rx "core waitfullybooted" &>/dev/null; then
 		ASTERISK_HEALTHY=1
 		NEW_VERSION=$(asterisk -rx "core show version" 2>/dev/null | grep -oP 'Asterisk \K[0-9]+\.[0-9]+\.[0-9]+' || echo "Unknown")
-		echo -e "${GREEN}✓ Asterisk is responding to CLI — Update successful!${NC}"
+		echo -e "${GREEN}✓ Asterisk is responding to CLI, update successful!${NC}"
 		break
 	fi
 	warn "Waiting for Asterisk to respond... ($i/10)"
@@ -371,7 +385,8 @@ done
 if [ $ASTERISK_HEALTHY -eq 0 ]; then
 	echo -e "${RED}[ERROR] Asterisk failed to start after update. Rolling back...${NC}" | tee -a "$LOG_FILE"
 	systemctl stop asterisk >> "$LOG_FILE" 2>&1 || true
-	pkill -9 asterisk 2>/dev/null || true
+	# -x, or the pattern matches this script (update_asterisk) and kills the rollback
+	pkill -9 -x asterisk 2>/dev/null || true
 
 	# Restore binary
 	if [ -f "$BACKUP_DIR/asterisk" ]; then
@@ -393,17 +408,25 @@ if [ $ASTERISK_HEALTHY -eq 0 ]; then
 	fi
 
 	ldconfig
-	systemctl start asterisk >> "$LOG_FILE" 2>&1
-	sleep 3
+	# the crashing build may have used up the unit's start limit
+	systemctl reset-failed asterisk > /dev/null 2>&1 || true
+	systemctl start asterisk >> "$LOG_FILE" 2>&1 || true
+	sleep 5
+	start_freepbx
 
-	# Keep backup for diagnostics — do NOT delete
+	# Keep backup for diagnostics, do NOT delete
 	echo -e "${YELLOW}Backup preserved at $BACKUP_DIR for diagnostics.${NC}"
-	error "Rollback complete. Previous version restored. Check: journalctl -xeu asterisk"
+	if asterisk -rx "core show version" &>/dev/null; then
+		error "Rollback complete. Previous version restored and running. Check: journalctl -xeu asterisk"
+	fi
+	error "Rollback done but Asterisk did not come back. Check: journalctl -xeu asterisk"
 fi
 
 # ============================================================================
 # FINAL VALIDATION
 # ============================================================================
+
+start_freepbx
 
 message "Running FreePBX reload..."
 if command -v fwconsole &> /dev/null; then
