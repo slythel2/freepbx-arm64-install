@@ -200,33 +200,6 @@ EOF
 }
 
 # ============================================================================
-# PACKAGE MANAGEMENT
-# ============================================================================
-
-isinstalled() {
-	PKG_OK=$(dpkg-query -W --showformat='${Status}\n' "$@" 2>/dev/null | grep "install ok installed")
-	[ -n "$PKG_OK" ]
-}
-
-pkg_install() {
-	log "############################### "
-	PKG=("$@")
-	if isinstalled "${PKG[@]}"; then
-		log "${PKG[*]} already present ...."
-	else
-		message "Installing ${PKG[*]} ...."
-		apt-get -y --ignore-missing -o DPkg::Options::="--force-confnew" -o Dpkg::Options::="--force-overwrite" install "${PKG[@]}" >> "$LOG_FILE"
-		if isinstalled "${PKG[@]}"; then
-			message "${PKG[*]} installed successfully...."
-		else
-			message "${PKG[*]} failed to install ...."
-			terminate
-		fi
-	fi
-	log "############################### "
-}
-
-# ============================================================================
 # SYSTEM PREPARATION
 # ============================================================================
 
