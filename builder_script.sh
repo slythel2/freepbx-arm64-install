@@ -212,7 +212,10 @@ if [ -f /tmp/asterisk_version.txt ]; then
 fi
 
 cd $BUILD_DIR/staging
-TAR_NAME="asterisk-${ASTERISK_VER}-arm64-debian12.tar.gz"
+# named after the major only (22.9.0 -> 22-current): the fallback url in the
+# installer and the updater asks for this exact name from the latest release.
+# the real version is in VERSION.txt
+TAR_NAME="asterisk-${ASTERISK_VER%%[.-]*}-current-arm64-debian12.tar.gz"
 echo ">>> [BUILDER] Creating archive at $OUTPUT_DIR/$TAR_NAME..."
 tar -czvf "$OUTPUT_DIR/$TAR_NAME" .
 
