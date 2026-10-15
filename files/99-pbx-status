@@ -50,7 +50,7 @@ AST_VERSION=$(asterisk -rx "core show version" 2>/dev/null | head -n1 | awk '{pr
 
 # Service Status Check
 check_service() {
-    systemctl is-active --quiet $1 2>/dev/null && echo -e "${GREEN}●${NC} ONLINE" || echo -e "${RED}●${NC} OFFLINE"
+    systemctl is-active --quiet "$1" 2>/dev/null && echo -e "${GREEN}●${NC} ONLINE" || echo -e "${RED}●${NC} OFFLINE"
 }
 
 ASTERISK_STATUS=$(check_service asterisk)

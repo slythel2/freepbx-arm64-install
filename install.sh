@@ -120,7 +120,7 @@ errorHandler() {
 
 terminate() {
 	local exit_code=$?
-	if [ $exit_code -ne 0 ]; then
+	if [ "$exit_code" -ne 0 ]; then
 		# errorHandler already logged it
 		log "Script terminated with exit code $exit_code"
 	fi
@@ -157,9 +157,11 @@ check_script_version() {
 	if dpkg --compare-versions "$latest_ver" gt "$SCRIPTVER" 2>/dev/null; then
 		echo ""
 		echo -e "${YELLOW}╔══════════════════════════════════════════════════════════╗${NC}"
-		echo -e "${YELLOW}║  A newer version ($latest_ver) is available on GitHub.      ║${NC}"
-		echo -e "${YELLOW}║  You are running version $SCRIPTVER.                        ║${NC}"
-		echo -e "${YELLOW}║  Use --skipversion to bypass this check.                 ║${NC}"
+		# padded to the box width, whatever the length of the versions
+		printf "${YELLOW}║%-58s║${NC}\n" \
+			"  A newer version ($latest_ver) is available on GitHub." \
+			"  You are running version $SCRIPTVER." \
+			"  Use --skipversion to bypass this check."
 		echo -e "${YELLOW}╚══════════════════════════════════════════════════════════╝${NC}"
 		echo ""
 		echo -n "Continue anyway? [y/N]: "
@@ -200,33 +202,6 @@ EOF
 }
 
 # ============================================================================
-# PACKAGE MANAGEMENT
-# ============================================================================
-
-isinstalled() {
-	PKG_OK=$(dpkg-query -W --showformat='${Status}\n' "$@" 2>/dev/null | grep "install ok installed")
-	[ -n "$PKG_OK" ]
-}
-
-pkg_install() {
-	log "############################### "
-	PKG=("$@")
-	if isinstalled "${PKG[@]}"; then
-		log "${PKG[*]} already present ...."
-	else
-		message "Installing ${PKG[*]} ...."
-		apt-get -y --ignore-missing -o DPkg::Options::="--force-confnew" -o Dpkg::Options::="--force-overwrite" install "${PKG[@]}" >> "$LOG_FILE"
-		if isinstalled "${PKG[@]}"; then
-			message "${PKG[*]} installed successfully...."
-		else
-			message "${PKG[*]} failed to install ...."
-			terminate
-		fi
-	fi
-	log "############################### "
-}
-
-# ============================================================================
 # SYSTEM PREPARATION
 # ============================================================================
 
@@ -254,8 +229,9 @@ check_disk_space() {
 
 check_architecture() {
 	ARCH=$(dpkg --print-architecture)
-	if [ "$ARCH" != "arm64" ] && [ "$ARCH" != "amd64" ]; then
-		message "This installer supports arm64 and amd64 architectures."
+	# the Asterisk artifact and the ionCube loader are both built for arm64 only
+	if [ "$ARCH" != "arm64" ]; then
+		message "This installer supports the arm64 architecture only."
 		message "Current System's Architecture: $ARCH"
 		exit 1
 	fi
@@ -307,6 +283,11 @@ system_upgrade() {
 	fi
 }
 
+# major.minor of the installed php, 8.2 (bookworm's) until php is there
+php_version() {
+	php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2"
+}
+
 install_dependencies() {
 	setCurrentStep "Installing required packages"
 
@@ -339,7 +320,7 @@ install_dependencies() {
 	npm install -g pm2 >> "$LOG_FILE" 2>&1 || true
 
 	# fallback: versioned php packages if generic ones didn't create the apache sapi
-	PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
+	PHP_VER=$(php_version)
 	if [ ! -f "/etc/php/${PHP_VER}/apache2/php.ini" ]; then
 		message "PHP ${PHP_VER} apache2 SAPI not found, installing version-specific packages..."
 		apt-get install -y "php${PHP_VER}-cli" "php${PHP_VER}-common" "php${PHP_VER}-curl" \
@@ -358,7 +339,7 @@ configure_php() {
 	setCurrentStep "Configuring PHP settings"
 
 	# detect php version
-	PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
+	PHP_VER=$(php_version)
 	message "Detected PHP version: ${PHP_VER}"
 
 	for INI in /etc/php/${PHP_VER}/apache2/php.ini /etc/php/${PHP_VER}/cli/php.ini; do
@@ -397,16 +378,16 @@ install_ioncube_loader() {
 			PHP_EXT_DIR="/usr/lib/php/20220829"
 		fi
 
-		PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
+		PHP_VER=$(php_version)
 		# ensure php dirs exist
 		mkdir -p "/etc/php/${PHP_VER}/mods-available"
 		mkdir -p "/etc/php/${PHP_VER}/apache2/conf.d"
 		mkdir -p "/etc/php/${PHP_VER}/cli/conf.d"
 		if [ -f "ioncube/ioncube_loader_lin_${PHP_VER}.so" ]; then
-			cp ioncube/ioncube_loader_lin_${PHP_VER}.so "$PHP_EXT_DIR/"
+			cp "ioncube/ioncube_loader_lin_${PHP_VER}.so" "$PHP_EXT_DIR/"
 			echo "zend_extension = $PHP_EXT_DIR/ioncube_loader_lin_${PHP_VER}.so" > "/etc/php/${PHP_VER}/mods-available/ioncube.ini"
-			ln -sf /etc/php/${PHP_VER}/mods-available/ioncube.ini /etc/php/${PHP_VER}/apache2/conf.d/00-ioncube.ini
-			ln -sf /etc/php/${PHP_VER}/mods-available/ioncube.ini /etc/php/${PHP_VER}/cli/conf.d/00-ioncube.ini
+			ln -sf "/etc/php/${PHP_VER}/mods-available/ioncube.ini" "/etc/php/${PHP_VER}/apache2/conf.d/00-ioncube.ini"
+			ln -sf "/etc/php/${PHP_VER}/mods-available/ioncube.ini" "/etc/php/${PHP_VER}/cli/conf.d/00-ioncube.ini"
 			log "ionCube Loader installed successfully"
 		else
 			warn "ionCube Loader file not found, FreePBX commercial modules may not work"
@@ -445,7 +426,7 @@ download_asterisk_artifact() {
 	if [ -z "$LATEST_URL" ]; then
 		warn "Could not fetch latest release from GitHub API, using fallback URL."
 		ASTERISK_ARTIFACT_URL="$FALLBACK_ARTIFACT"
-		sha_url=""
+		sha_url="${FALLBACK_ARTIFACT}.sha256"
 	else
 		log "Latest release found: $LATEST_URL"
 		ASTERISK_ARTIFACT_URL="$LATEST_URL"
@@ -555,13 +536,17 @@ configure_database() {
 
 	# root authenticates via /root/.my.cnf (written in setup_mariadb), so the
 	# password is never placed on the command line where local users could read
-	# it from `ps`/ /proc/<pid>/cmdline.
-	mysql -u root -e "CREATE DATABASE IF NOT EXISTS asterisk; CREATE DATABASE IF NOT EXISTS asteriskcdrdb;"
-	mysql -u root -e "GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost' IDENTIFIED BY '$DB_ASTERISK_PASS';"
-	mysql -u root -e "GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'127.0.0.1' IDENTIFIED BY '$DB_ASTERISK_PASS';"
-	mysql -u root -e "GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'localhost';"
-	mysql -u root -e "GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'127.0.0.1';"
-	mysql -u root -e "FLUSH PRIVILEGES;"
+	# it from `ps`/ /proc/<pid>/cmdline. the asterisk one goes in on stdin for
+	# the same reason
+	mysql -u root <<SQL
+CREATE DATABASE IF NOT EXISTS asterisk;
+CREATE DATABASE IF NOT EXISTS asteriskcdrdb;
+GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost' IDENTIFIED BY '$DB_ASTERISK_PASS';
+GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'127.0.0.1' IDENTIFIED BY '$DB_ASTERISK_PASS';
+GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'localhost';
+GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'127.0.0.1';
+FLUSH PRIVILEGES;
+SQL
 
 	log "Configuring MySQL socket for FreePBX..."
 	REAL_SOCKET=$(find /run /var/run -name mysqld.sock 2>/dev/null | head -n 1)
@@ -603,7 +588,7 @@ configure_apache() {
     RewriteRule ^/$ /admin [R=302,L]
 
     <Directory /var/www/html>
-        Options Indexes FollowSymLinks
+        Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
     </Directory>
@@ -628,7 +613,6 @@ APACHEEOF
 	chown -R asterisk:asterisk /var/www/html
 
 	# php session dir
-	PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
 	SESSION_DIR="/var/lib/php/sessions"
 	mkdir -p "$SESSION_DIR"
 	chown asterisk:asterisk "$SESSION_DIR"
@@ -688,7 +672,8 @@ install_freepbx() {
 	rm -rf freepbx 2>/dev/null || true
 
 	log "Downloading FreePBX 17 tarball..."
-	if ! wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 3 http://mirror.freepbx.org/modules/packages/freepbx/freepbx-17.0-latest.tgz; then
+	# https: sangoma publishes no checksum for it, so the transport is the only check
+	if ! wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 3 https://mirror.freepbx.org/modules/packages/freepbx/freepbx-17.0-latest.tgz; then
 		error "Failed to download FreePBX tarball from mirror.freepbx.org"
 	fi
 	log "FreePBX tarball downloaded successfully."
@@ -699,14 +684,15 @@ install_freepbx() {
 	log "FreePBX extracted and ready."
 
 	log "Verifying MySQL connection..."
-	if ! mysql -u asterisk -p"$DB_ASTERISK_PASS" -e "SELECT 1;" &> /dev/null; then
+	# the environment, unlike the arguments, is readable by root and the owner only
+	if ! MYSQL_PWD="$DB_ASTERISK_PASS" mysql -u asterisk -e "SELECT 1;" &> /dev/null; then
 		error "Cannot connect to MySQL as asterisk user."
 	fi
 
 	log "Starting FreePBX core installation script in verbose mode..."
-	
+
 	set +e
-	
+
 	# run with verbose output so we can check for real errors
 	./install -n -v \
 		--dbuser asterisk \
@@ -714,20 +700,20 @@ install_freepbx() {
 		--webroot /var/www/html \
 		--user asterisk \
 		--group asterisk 2>&1 | tee /tmp/freepbx_install.log
-	
+
 	fp_exit=${PIPESTATUS[0]}
-	
+
 	set -e
 
 	cat /tmp/freepbx_install.log >> "$LOG_FILE"
 
-	if [ $fp_exit -ne 0 ]; then
+	if [ "$fp_exit" -ne 0 ]; then
 		if grep -q "You have successfully installed FreePBX" /tmp/freepbx_install.log; then
 			echo -e "${YELLOW}[WARNING] FreePBX returned error code $fp_exit, but output indicates success. Treating as false-positive and continuing.${NC}" | tee -a "$LOG_FILE"
 		else
 			echo -e "${RED}[ERROR] FreePBX core installation failed with code $fp_exit! Printing last 30 lines of verbose log:${NC}" | tee -a "$LOG_FILE"
 			tail -n 30 /tmp/freepbx_install.log
-			exit $fp_exit
+			exit "$fp_exit"
 		fi
 	fi
 
@@ -750,20 +736,22 @@ install_freepbx_modules() {
 	sleep 5
 
 	# module list
-	MODULES_LIST="asterisk-cli backup blacklist bulkhandler certman cidlookup \
-		configedit contactmanager customappsreg featurecodeadmin presencestate \
-		qxact_reports recordings soundlang superfecta ucp userman \
-		amd announcement calendar callback callflow callforward callrecording \
-		callwaiting conferences dictate directory disa donotdisturb findmefollow \
-		infoservices ivr languages miscapps miscdests paging parking queueprio \
-		queues ringgroups setcid timeconditions tts vmblast wakeup \
-		api sms webrtc dashboard dahdiconfig \
-		asterisklogfiles cdr cel phpinfo printextensions weakpasswords \
-		asteriskapi arimanager fax filestore iaxsettings musiconhold pinsets \
-		sipsettings ttsengines voicemail pm2"
+	MODULES_LIST=(
+		asterisk-cli backup blacklist bulkhandler certman cidlookup
+		configedit contactmanager customappsreg featurecodeadmin presencestate
+		qxact_reports recordings soundlang superfecta ucp userman
+		amd announcement calendar callback callflow callforward callrecording
+		callwaiting conferences dictate directory disa donotdisturb findmefollow
+		infoservices ivr languages miscapps miscdests paging parking queueprio
+		queues ringgroups setcid timeconditions tts vmblast wakeup
+		api sms webrtc dashboard dahdiconfig
+		asterisklogfiles cdr cel phpinfo printextensions weakpasswords
+		asteriskapi arimanager fax filestore iaxsettings musiconhold pinsets
+		sipsettings ttsengines voicemail pm2
+	)
 
 	log "Starting bulk module installation..."
-	if fwconsole ma downloadinstall $MODULES_LIST >> "$LOG_FILE" 2>&1; then
+	if fwconsole ma downloadinstall "${MODULES_LIST[@]}" >> "$LOG_FILE" 2>&1; then
 		log "Modules installed successfully."
 	else
 		warn "fwconsole ma downloadinstall returned non-zero. Some modules may have failed or already exist."

@@ -6,6 +6,8 @@
 # ============================================================================
 
 set -e
+# bump on every change, it is how installed copies find out they are outdated
+SCRIPTVER="1.1.0"
 
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
@@ -13,6 +15,7 @@ REPO_OWNER="slythel2"
 # releases live here, nowhere else. do not repoint at a private repo, wget gets
 # 404 on both the api and the download and the script just gives up
 REPO_NAME="freepbx-arm64-install"
+REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/asterisk-22-current-arm64-debian12.tar.gz"
 
 LOG_FOLDER="/var/log/pbx"
@@ -22,24 +25,31 @@ BACKUP_BASE="/var/backups/asterisk"
 STAGE_DIR="/tmp/asterisk_update_stage"
 
 # --- ARGUMENT PARSING ---
+ORIG_ARGS=("$@")
 DRY_RUN=false
+skipversion=false
 while [[ $# -gt 0 ]]; do
 	case $1 in
 		--dry-run)
 			DRY_RUN=true
 			shift
 			;;
+		--skipversion)
+			skipversion=true
+			shift
+			;;
 		--help|-h)
-			echo "Usage: $0 [--dry-run]"
+			echo "Usage: $0 [--dry-run] [--skipversion]"
 			echo ""
 			echo "Options:"
-			echo "  --dry-run    Check available version without downloading or stopping Asterisk"
-			echo "  --help       Show this help"
+			echo "  --dry-run        Check available version without downloading or stopping Asterisk"
+			echo "  --skipversion    Do not update this script before running it"
+			echo "  --help           Show this help"
 			exit 0
 			;;
 		*)
 			echo "Unknown option: $1"
-			echo "Usage: $0 [--dry-run]"
+			echo "Usage: $0 [--dry-run] [--skipversion]"
 			exit 1
 			;;
 	esac
@@ -96,10 +106,48 @@ fi
 mkdir -p "${LOG_FOLDER}"
 touch "${LOG_FILE}"
 
-trap 'rm -rf "$STAGE_DIR" /tmp/asterisk_update.tar.gz 2>/dev/null' INT TERM
+trap 'rm -rf "$STAGE_DIR" /tmp/asterisk_update.tar.gz 2>/dev/null; exit 130' INT TERM
+
+# ============================================================================
+# SELF-UPDATE
+# ============================================================================
+
+# the installer writes this script once, so without this a fix to the updater
+# would never reach the boxes already installed
+self_update() {
+	if [ "$skipversion" = true ] || [ "$DRY_RUN" = true ]; then
+		return
+	fi
+
+	local latest_script latest_ver self
+	latest_script=$(mktemp)
+	if ! wget -q -T 10 "${REPO_RAW}/update_asterisk.sh" -O "$latest_script"; then
+		warn "Could not check for a newer update_asterisk.sh. Continuing with v${SCRIPTVER}."
+		rm -f "$latest_script"
+		return
+	fi
+
+	latest_ver=$(grep '^SCRIPTVER=' "$latest_script" | head -1 | cut -d'"' -f2)
+	if [ -n "$latest_ver" ] && dpkg --compare-versions "$latest_ver" gt "$SCRIPTVER" && bash -n "$latest_script"; then
+		message "Updating update_asterisk.sh v${SCRIPTVER} -> v${latest_ver}..."
+		self=$(readlink -f "$0")
+		# a rename, not an overwrite: bash is still reading this very file
+		cp "$latest_script" "${self}.new"
+		chmod 755 "${self}.new"
+		mv -f "${self}.new" "$self"
+		rm -f "$latest_script"
+		exec "$self" --skipversion "${ORIG_ARGS[@]}"
+	fi
+
+	rm -f "$latest_script"
+	log "update_asterisk.sh is up to date (v${SCRIPTVER})."
+}
+
+self_update
 
 echo -e "${GREEN}========================================================${NC}"
 echo -e "${GREEN}          ASTERISK 22 UPDATER (with Rollback)           ${NC}"
+echo -e "${GREEN}                    Version: ${SCRIPTVER}                       ${NC}"
 echo -e "${GREEN}========================================================${NC}"
 
 log "Starting Asterisk 22 update..."
@@ -278,6 +326,84 @@ if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
 fi
 
 # ============================================================================
+# STAGE (before the stop, a broken tarball must not cost any downtime)
+# ============================================================================
+
+tar -xzf /tmp/asterisk_update.tar.gz -C "$STAGE_DIR" || error "Failed to extract the update. Asterisk was NOT stopped."
+
+# Extract confirmed version from tarball's VERSION.txt
+if [ -f "$STAGE_DIR/VERSION.txt" ]; then
+	TARBALL_VERSION=$(tr -d '[:space:]' < "$STAGE_DIR/VERSION.txt")
+	message "Tarball contains Asterisk version: $TARBALL_VERSION"
+	# Update AVAILABLE_VERSION if we got a better answer from the tarball
+	if echo "$TARBALL_VERSION" | grep -qP '^[0-9]+\.[0-9]+\.[0-9]+'; then
+		AVAILABLE_VERSION="$TARBALL_VERSION"
+	fi
+fi
+
+# ============================================================================
+# ROLLBACK
+# ============================================================================
+
+# stopping asterisk also stopped freepbx.service (Requires=), and with it ucp and fastagi
+start_freepbx() {
+	systemctl is-enabled --quiet freepbx 2>/dev/null || return 0
+	systemctl start freepbx >> "$LOG_FILE" 2>&1 \
+		|| warn "freepbx.service did not start, UCP and FastAGI are down. Run: systemctl start freepbx"
+}
+
+# puts the backed up build back and starts it again. never returns
+rollback() {
+	systemctl stop asterisk >> "$LOG_FILE" 2>&1 || true
+	# -x, or the pattern matches this script (update_asterisk) and kills the rollback
+	pkill -9 -x asterisk 2>/dev/null || true
+
+	# Restore binary
+	if [ -f "$BACKUP_DIR/asterisk" ]; then
+		cp -f "$BACKUP_DIR/asterisk" /usr/sbin/asterisk
+		chown asterisk:asterisk /usr/sbin/asterisk
+		chmod +x /usr/sbin/asterisk
+	fi
+
+	# Restore modules, but never from an empty backup: that would wipe them all
+	if [ -d "$BACKUP_DIR/modules" ] && ls "$BACKUP_DIR/modules"/* &>/dev/null; then
+		rm -rf /usr/lib/asterisk/modules/*
+		cp -r "$BACKUP_DIR/modules"/* /usr/lib/asterisk/modules/
+		chown -R asterisk:asterisk /usr/lib/asterisk/modules
+	fi
+
+	# Restore shared libraries
+	if [ -d "$BACKUP_DIR/libs" ] && ls "$BACKUP_DIR/libs"/*.so* &>/dev/null; then
+		cp -f "$BACKUP_DIR/libs"/*.so* /usr/lib/
+	fi
+
+	rm -rf "$STAGE_DIR" /tmp/asterisk_update.tar.gz
+	ldconfig
+	# the crashing build may have used up the unit's start limit
+	systemctl reset-failed asterisk > /dev/null 2>&1 || true
+	systemctl start asterisk >> "$LOG_FILE" 2>&1 || true
+	sleep 5
+	start_freepbx
+
+	# Keep backup for diagnostics, do NOT delete
+	echo -e "${YELLOW}Backup preserved at $BACKUP_DIR for diagnostics.${NC}"
+	if asterisk -rx "core show version" &>/dev/null; then
+		error "Rollback complete. Previous version restored and running. Check: journalctl -xeu asterisk"
+	fi
+	error "Rollback done but Asterisk did not come back. Check: journalctl -xeu asterisk"
+}
+
+# asterisk is down from the stop below until the health check passes. a failed
+# command or a ctrl-c in between must bring the old build back, not exit with no pbx
+deploy_failed() {
+	set +e
+	trap - ERR INT TERM
+	echo -e "${RED}[ERROR] Update interrupted at line $1. Rolling back...${NC}" | tee -a "$LOG_FILE"
+	rollback
+}
+trap 'deploy_failed "$LINENO"' ERR INT TERM
+
+# ============================================================================
 # GRACEFUL STOP
 # ============================================================================
 
@@ -312,17 +438,6 @@ fi
 # ============================================================================
 
 message "Deploying updated binaries, modules, and libraries..."
-tar -xzf /tmp/asterisk_update.tar.gz -C "$STAGE_DIR"
-
-# Extract confirmed version from tarball's VERSION.txt
-if [ -f "$STAGE_DIR/VERSION.txt" ]; then
-	TARBALL_VERSION=$(cat "$STAGE_DIR/VERSION.txt" | tr -d '[:space:]')
-	message "Tarball contains Asterisk version: $TARBALL_VERSION"
-	# Update AVAILABLE_VERSION if we got a better answer from the tarball
-	if echo "$TARBALL_VERSION" | grep -qP '^[0-9]+\.[0-9]+\.[0-9]+'; then
-		AVAILABLE_VERSION="$TARBALL_VERSION"
-	fi
-fi
 
 # binary, modules and libraries only, the tarball's sample configs must not reach /etc/asterisk
 
@@ -351,13 +466,6 @@ ldconfig
 # HEALTH CHECK
 # ============================================================================
 
-# stopping asterisk also stopped freepbx.service (Requires=), and with it ucp and fastagi
-start_freepbx() {
-	systemctl is-enabled --quiet freepbx 2>/dev/null || return 0
-	systemctl start freepbx >> "$LOG_FILE" 2>&1 \
-		|| warn "freepbx.service did not start, UCP and FastAGI are down. Run: systemctl start freepbx"
-}
-
 message "Starting Asterisk and performing health check..."
 # a failed start must reach the rollback below, not exit here
 systemctl reset-failed asterisk > /dev/null 2>&1 || true
@@ -378,48 +486,10 @@ for i in {1..10}; do
 	sleep 2
 done
 
-# ============================================================================
-# ROLLBACK (if health check failed)
-# ============================================================================
-
+trap - ERR INT TERM
 if [ $ASTERISK_HEALTHY -eq 0 ]; then
 	echo -e "${RED}[ERROR] Asterisk failed to start after update. Rolling back...${NC}" | tee -a "$LOG_FILE"
-	systemctl stop asterisk >> "$LOG_FILE" 2>&1 || true
-	# -x, or the pattern matches this script (update_asterisk) and kills the rollback
-	pkill -9 -x asterisk 2>/dev/null || true
-
-	# Restore binary
-	if [ -f "$BACKUP_DIR/asterisk" ]; then
-		cp -f "$BACKUP_DIR/asterisk" /usr/sbin/asterisk
-		chown asterisk:asterisk /usr/sbin/asterisk
-		chmod +x /usr/sbin/asterisk
-	fi
-
-	# Restore modules
-	if [ -d "$BACKUP_DIR/modules" ]; then
-		rm -rf /usr/lib/asterisk/modules/*
-		cp -r "$BACKUP_DIR/modules"/* /usr/lib/asterisk/modules/
-		chown -R asterisk:asterisk /usr/lib/asterisk/modules
-	fi
-
-	# Restore shared libraries
-	if [ -d "$BACKUP_DIR/libs" ] && ls "$BACKUP_DIR/libs"/*.so* &>/dev/null; then
-		cp -f "$BACKUP_DIR/libs"/*.so* /usr/lib/
-	fi
-
-	ldconfig
-	# the crashing build may have used up the unit's start limit
-	systemctl reset-failed asterisk > /dev/null 2>&1 || true
-	systemctl start asterisk >> "$LOG_FILE" 2>&1 || true
-	sleep 5
-	start_freepbx
-
-	# Keep backup for diagnostics, do NOT delete
-	echo -e "${YELLOW}Backup preserved at $BACKUP_DIR for diagnostics.${NC}"
-	if asterisk -rx "core show version" &>/dev/null; then
-		error "Rollback complete. Previous version restored and running. Check: journalctl -xeu asterisk"
-	fi
-	error "Rollback done but Asterisk did not come back. Check: journalctl -xeu asterisk"
+	rollback
 fi
 
 # ============================================================================
