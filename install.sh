@@ -682,9 +682,9 @@ install_freepbx() {
 	fi
 
 	log "Starting FreePBX core installation script in verbose mode..."
-	
+
 	set +e
-	
+
 	# run with verbose output so we can check for real errors
 	./install -n -v \
 		--dbuser asterisk \
@@ -692,9 +692,9 @@ install_freepbx() {
 		--webroot /var/www/html \
 		--user asterisk \
 		--group asterisk 2>&1 | tee /tmp/freepbx_install.log
-	
+
 	fp_exit=${PIPESTATUS[0]}
-	
+
 	set -e
 
 	cat /tmp/freepbx_install.log >> "$LOG_FILE"

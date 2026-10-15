@@ -41,11 +41,11 @@ jobs:
         run: |
           # Extract version from the tarball
           TARBALL=$(ls asterisk-*.tar.gz | head -n1)
-          
+
           # Try to extract VERSION.txt from tarball
           # Note: tarball is created with `tar ... .` so paths start with ./
           tar -xzf "$TARBALL" ./VERSION.txt 2>/dev/null || true
-          
+
           if [ -f VERSION.txt ]; then
             ASTERISK_VERSION=$(cat VERSION.txt | tr -d '[:space:]')
             echo ">>> Found VERSION.txt with version: $ASTERISK_VERSION"
@@ -62,7 +62,7 @@ jobs:
               echo ">>> WARNING: Could not determine version, using default: $ASTERISK_VERSION"
             fi
           fi
-          
+
           echo "version=$ASTERISK_VERSION" >> $GITHUB_OUTPUT
           echo "tarball=$TARBALL" >> $GITHUB_OUTPUT
           BUILD_DATE=$(date +"%Y-%m-%d")
@@ -75,18 +75,18 @@ jobs:
           name: "Asterisk 22 LTS ARM64 Build - v${{ steps.version.outputs.version }}"
           body: |
             ## Asterisk 22 LTS - ARM64 Debian 12 (Bookworm)
-            
+
             **Version:** `${{ steps.version.outputs.version }}`  
             **Architecture:** ARM64 (aarch64)  
             **Target OS:** Debian 12 Bookworm  
             **Build Date:** ${{ steps.version.outputs.build_date }}  
             **Build Number:** #${{ github.run_number }}
-            
+
             ###  Artifact
-            
+
             - **File:** `${{ steps.version.outputs.tarball }}`
             - **Platform:** Native ARM64 build for Debian 12 Bookworm
-            
+
             For more information, see the [README](https://github.com/${{ github.repository }}/blob/main/README.md).
           files: |
             asterisk-*.tar.gz
