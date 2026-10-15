@@ -31,13 +31,35 @@ jobs:
           apt-get update
           apt-get install -y git curl wget build-essential sudo
 
+      # a scheduled run with nothing new upstream would only publish a duplicate
+      # release. a manual run always builds
+      - name: Check For A New Upstream Version
+        id: check
+        if: github.event_name == 'schedule'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          UPSTREAM=$(curl -sfL https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-current.tar.gz \
+            | tar -xzO --wildcards --no-wildcards-match-slash '*/.version' | tr -d '[:space:]' || true)
+          LATEST_TAG=$(curl -sf -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
+            | grep -oP '"tag_name":\s*"\K[^"]+' || true)
+          echo ">>> Upstream: ${UPSTREAM:-unknown}, latest release: ${LATEST_TAG:-none}"
+          if [ -n "$UPSTREAM" ] && [[ "$LATEST_TAG" == "asterisk-${UPSTREAM}-build"* ]]; then
+            echo ">>> Asterisk $UPSTREAM is already released, nothing to build."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Builder Script (Native Mode)
+        if: steps.check.outputs.skip != 'true'
         run: |
           chmod +x builder_script.sh
           ./builder_script.sh "${{ inputs.asterisk_version || '22-current' }}"
 
       - name: Extract Asterisk Version
         id: version
+        if: steps.check.outputs.skip != 'true'
         run: |
           # Extract version from the tarball
           TARBALL=$(ls asterisk-*.tar.gz | head -n1)
@@ -69,6 +91,7 @@ jobs:
           echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
 
       - name: Upload Release to GitHub
+        if: steps.check.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: asterisk-${{ steps.version.outputs.version }}-build${{ github.run_number }}
