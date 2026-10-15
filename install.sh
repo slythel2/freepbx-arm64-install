@@ -534,13 +534,17 @@ configure_database() {
 
 	# root authenticates via /root/.my.cnf (written in setup_mariadb), so the
 	# password is never placed on the command line where local users could read
-	# it from `ps`/ /proc/<pid>/cmdline.
-	mysql -u root -e "CREATE DATABASE IF NOT EXISTS asterisk; CREATE DATABASE IF NOT EXISTS asteriskcdrdb;"
-	mysql -u root -e "GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost' IDENTIFIED BY '$DB_ASTERISK_PASS';"
-	mysql -u root -e "GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'127.0.0.1' IDENTIFIED BY '$DB_ASTERISK_PASS';"
-	mysql -u root -e "GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'localhost';"
-	mysql -u root -e "GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'127.0.0.1';"
-	mysql -u root -e "FLUSH PRIVILEGES;"
+	# it from `ps`/ /proc/<pid>/cmdline. the asterisk one goes in on stdin for
+	# the same reason
+	mysql -u root <<SQL
+CREATE DATABASE IF NOT EXISTS asterisk;
+CREATE DATABASE IF NOT EXISTS asteriskcdrdb;
+GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost' IDENTIFIED BY '$DB_ASTERISK_PASS';
+GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'127.0.0.1' IDENTIFIED BY '$DB_ASTERISK_PASS';
+GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'localhost';
+GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'127.0.0.1';
+FLUSH PRIVILEGES;
+SQL
 
 	log "Configuring MySQL socket for FreePBX..."
 	REAL_SOCKET=$(find /run /var/run -name mysqld.sock 2>/dev/null | head -n 1)
@@ -678,7 +682,8 @@ install_freepbx() {
 	log "FreePBX extracted and ready."
 
 	log "Verifying MySQL connection..."
-	if ! mysql -u asterisk -p"$DB_ASTERISK_PASS" -e "SELECT 1;" &> /dev/null; then
+	# the environment, unlike the arguments, is readable by root and the owner only
+	if ! MYSQL_PWD="$DB_ASTERISK_PASS" mysql -u asterisk -e "SELECT 1;" &> /dev/null; then
 		error "Cannot connect to MySQL as asterisk user."
 	fi
 
