@@ -666,7 +666,8 @@ install_freepbx() {
 	rm -rf freepbx 2>/dev/null || true
 
 	log "Downloading FreePBX 17 tarball..."
-	if ! wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 3 http://mirror.freepbx.org/modules/packages/freepbx/freepbx-17.0-latest.tgz; then
+	# https: sangoma publishes no checksum for it, so the transport is the only check
+	if ! wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 3 https://mirror.freepbx.org/modules/packages/freepbx/freepbx-17.0-latest.tgz; then
 		error "Failed to download FreePBX tarball from mirror.freepbx.org"
 	fi
 	log "FreePBX tarball downloaded successfully."
