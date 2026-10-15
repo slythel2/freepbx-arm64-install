@@ -424,7 +424,7 @@ download_asterisk_artifact() {
 	if [ -z "$LATEST_URL" ]; then
 		warn "Could not fetch latest release from GitHub API, using fallback URL."
 		ASTERISK_ARTIFACT_URL="$FALLBACK_ARTIFACT"
-		sha_url=""
+		sha_url="${FALLBACK_ARTIFACT}.sha256"
 	else
 		log "Latest release found: $LATEST_URL"
 		ASTERISK_ARTIFACT_URL="$LATEST_URL"
