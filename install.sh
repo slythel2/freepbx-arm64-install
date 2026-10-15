@@ -582,7 +582,7 @@ configure_apache() {
     RewriteRule ^/$ /admin [R=302,L]
 
     <Directory /var/www/html>
-        Options Indexes FollowSymLinks
+        Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
     </Directory>
