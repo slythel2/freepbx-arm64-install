@@ -254,8 +254,9 @@ check_disk_space() {
 
 check_architecture() {
 	ARCH=$(dpkg --print-architecture)
-	if [ "$ARCH" != "arm64" ] && [ "$ARCH" != "amd64" ]; then
-		message "This installer supports arm64 and amd64 architectures."
+	# the Asterisk artifact and the ionCube loader are both built for arm64 only
+	if [ "$ARCH" != "arm64" ]; then
+		message "This installer supports the arm64 architecture only."
 		message "Current System's Architecture: $ARCH"
 		exit 1
 	fi
