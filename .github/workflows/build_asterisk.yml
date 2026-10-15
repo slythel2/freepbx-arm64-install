@@ -23,8 +23,10 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
+      # actions pinned to a commit, like the opus codec in builder_script.sh: a
+      # moved tag must not change what runs with write access to the releases
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Prepare Build Environment
         run: |
@@ -92,7 +94,7 @@ jobs:
 
       - name: Upload Release to GitHub
         if: steps.check.outputs.skip != 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: asterisk-${{ steps.version.outputs.version }}-build${{ github.run_number }}
           name: "Asterisk 22 LTS ARM64 Build - v${{ steps.version.outputs.version }}"
