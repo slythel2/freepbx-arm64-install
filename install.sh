@@ -157,9 +157,11 @@ check_script_version() {
 	if dpkg --compare-versions "$latest_ver" gt "$SCRIPTVER" 2>/dev/null; then
 		echo ""
 		echo -e "${YELLOW}╔══════════════════════════════════════════════════════════╗${NC}"
-		echo -e "${YELLOW}║  A newer version ($latest_ver) is available on GitHub.      ║${NC}"
-		echo -e "${YELLOW}║  You are running version $SCRIPTVER.                        ║${NC}"
-		echo -e "${YELLOW}║  Use --skipversion to bypass this check.                 ║${NC}"
+		# padded to the box width, whatever the length of the versions
+		printf "${YELLOW}║%-58s║${NC}\n" \
+			"  A newer version ($latest_ver) is available on GitHub." \
+			"  You are running version $SCRIPTVER." \
+			"  Use --skipversion to bypass this check."
 		echo -e "${YELLOW}╚══════════════════════════════════════════════════════════╝${NC}"
 		echo ""
 		echo -n "Continue anyway? [y/N]: "
