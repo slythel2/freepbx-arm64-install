@@ -316,7 +316,7 @@ tar -xzf /tmp/asterisk_update.tar.gz -C "$STAGE_DIR"
 
 # Extract confirmed version from tarball's VERSION.txt
 if [ -f "$STAGE_DIR/VERSION.txt" ]; then
-	TARBALL_VERSION=$(cat "$STAGE_DIR/VERSION.txt" | tr -d '[:space:]')
+	TARBALL_VERSION=$(tr -d '[:space:]' < "$STAGE_DIR/VERSION.txt")
 	message "Tarball contains Asterisk version: $TARBALL_VERSION"
 	# Update AVAILABLE_VERSION if we got a better answer from the tarball
 	if echo "$TARBALL_VERSION" | grep -qP '^[0-9]+\.[0-9]+\.[0-9]+'; then

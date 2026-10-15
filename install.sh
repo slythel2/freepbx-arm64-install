@@ -120,7 +120,7 @@ errorHandler() {
 
 terminate() {
 	local exit_code=$?
-	if [ $exit_code -ne 0 ]; then
+	if [ "$exit_code" -ne 0 ]; then
 		# errorHandler already logged it
 		log "Script terminated with exit code $exit_code"
 	fi
@@ -382,10 +382,10 @@ install_ioncube_loader() {
 		mkdir -p "/etc/php/${PHP_VER}/apache2/conf.d"
 		mkdir -p "/etc/php/${PHP_VER}/cli/conf.d"
 		if [ -f "ioncube/ioncube_loader_lin_${PHP_VER}.so" ]; then
-			cp ioncube/ioncube_loader_lin_${PHP_VER}.so "$PHP_EXT_DIR/"
+			cp "ioncube/ioncube_loader_lin_${PHP_VER}.so" "$PHP_EXT_DIR/"
 			echo "zend_extension = $PHP_EXT_DIR/ioncube_loader_lin_${PHP_VER}.so" > "/etc/php/${PHP_VER}/mods-available/ioncube.ini"
-			ln -sf /etc/php/${PHP_VER}/mods-available/ioncube.ini /etc/php/${PHP_VER}/apache2/conf.d/00-ioncube.ini
-			ln -sf /etc/php/${PHP_VER}/mods-available/ioncube.ini /etc/php/${PHP_VER}/cli/conf.d/00-ioncube.ini
+			ln -sf "/etc/php/${PHP_VER}/mods-available/ioncube.ini" "/etc/php/${PHP_VER}/apache2/conf.d/00-ioncube.ini"
+			ln -sf "/etc/php/${PHP_VER}/mods-available/ioncube.ini" "/etc/php/${PHP_VER}/cli/conf.d/00-ioncube.ini"
 			log "ionCube Loader installed successfully"
 		else
 			warn "ionCube Loader file not found, FreePBX commercial modules may not work"
@@ -699,13 +699,13 @@ install_freepbx() {
 
 	cat /tmp/freepbx_install.log >> "$LOG_FILE"
 
-	if [ $fp_exit -ne 0 ]; then
+	if [ "$fp_exit" -ne 0 ]; then
 		if grep -q "You have successfully installed FreePBX" /tmp/freepbx_install.log; then
 			echo -e "${YELLOW}[WARNING] FreePBX returned error code $fp_exit, but output indicates success. Treating as false-positive and continuing.${NC}" | tee -a "$LOG_FILE"
 		else
 			echo -e "${RED}[ERROR] FreePBX core installation failed with code $fp_exit! Printing last 30 lines of verbose log:${NC}" | tee -a "$LOG_FILE"
 			tail -n 30 /tmp/freepbx_install.log
-			exit $fp_exit
+			exit "$fp_exit"
 		fi
 	fi
 
@@ -728,20 +728,22 @@ install_freepbx_modules() {
 	sleep 5
 
 	# module list
-	MODULES_LIST="asterisk-cli backup blacklist bulkhandler certman cidlookup \
-		configedit contactmanager customappsreg featurecodeadmin presencestate \
-		qxact_reports recordings soundlang superfecta ucp userman \
-		amd announcement calendar callback callflow callforward callrecording \
-		callwaiting conferences dictate directory disa donotdisturb findmefollow \
-		infoservices ivr languages miscapps miscdests paging parking queueprio \
-		queues ringgroups setcid timeconditions tts vmblast wakeup \
-		api sms webrtc dashboard dahdiconfig \
-		asterisklogfiles cdr cel phpinfo printextensions weakpasswords \
-		asteriskapi arimanager fax filestore iaxsettings musiconhold pinsets \
-		sipsettings ttsengines voicemail pm2"
+	MODULES_LIST=(
+		asterisk-cli backup blacklist bulkhandler certman cidlookup
+		configedit contactmanager customappsreg featurecodeadmin presencestate
+		qxact_reports recordings soundlang superfecta ucp userman
+		amd announcement calendar callback callflow callforward callrecording
+		callwaiting conferences dictate directory disa donotdisturb findmefollow
+		infoservices ivr languages miscapps miscdests paging parking queueprio
+		queues ringgroups setcid timeconditions tts vmblast wakeup
+		api sms webrtc dashboard dahdiconfig
+		asterisklogfiles cdr cel phpinfo printextensions weakpasswords
+		asteriskapi arimanager fax filestore iaxsettings musiconhold pinsets
+		sipsettings ttsengines voicemail pm2
+	)
 
 	log "Starting bulk module installation..."
-	if fwconsole ma downloadinstall $MODULES_LIST >> "$LOG_FILE" 2>&1; then
+	if fwconsole ma downloadinstall "${MODULES_LIST[@]}" >> "$LOG_FILE" 2>&1; then
 		log "Modules installed successfully."
 	else
 		warn "fwconsole ma downloadinstall returned non-zero. Some modules may have failed or already exist."

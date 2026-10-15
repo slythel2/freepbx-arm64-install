@@ -116,7 +116,7 @@ echo ">>> [BUILDER] Configuring..."
 #         → include/asterisk/version.h (generated after configure)
 #         → config.log PACKAGE_VERSION (may only contain major version)
 if [ -f ".version" ]; then
-    REAL_VERSION=$(cat .version | tr -d '[:space:]')
+    REAL_VERSION=$(tr -d '[:space:]' < .version)
     echo ">>> [BUILDER] Version from .version file: $REAL_VERSION"
 elif [ -f "include/asterisk/version.h" ]; then
     REAL_VERSION=$(grep 'ASTERISK_VERSION' include/asterisk/version.h | grep -oP '"[^"]*"' | tr -d '"' | head -n1)
