@@ -26,12 +26,18 @@ update_asterisk.sh
 
 Pre-compiled Asterisk binaries are built on native ARM64 GitHub Actions runners and published as [GitHub Releases](https://github.com/slythel2/freepbx-arm64-install/releases). The updater downloads the latest release, backs up the current installation, deploys the new binaries, and automatically rolls back if the health check fails.
 
-## CLI Flags
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Show the installed and available versions without downloading or stopping Asterisk |
+| `--help` | Show the available options |
+
+## Installer Flags
 
 | Flag | Description |
 |------|-------------|
 | `--skipversion` | Skip the self-update check at startup |
 | `--nochrony` | Skip chrony (NTP) installation |
+| `--help` | Show the available options |
 
 ## Features
 
