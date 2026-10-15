@@ -29,7 +29,15 @@ Pre-compiled Asterisk binaries are built on native ARM64 GitHub Actions runners 
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Show the installed and available versions without downloading or stopping Asterisk |
+| `--skipversion` | Do not update the updater itself before running it |
 | `--help` | Show the available options |
+
+The updater replaces itself with the latest version from this repository before it runs. Copies installed before this was added cannot do that, so download it once by hand:
+
+```bash
+wget -O /usr/local/bin/update_asterisk.sh https://raw.githubusercontent.com/slythel2/freepbx-arm64-install/refs/heads/main/update_asterisk.sh
+chmod +x /usr/local/bin/update_asterisk.sh
+```
 
 ## Installer Flags
 

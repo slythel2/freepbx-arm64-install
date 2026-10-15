@@ -6,6 +6,8 @@
 # ============================================================================
 
 set -e
+# bump on every change, it is how installed copies find out they are outdated
+SCRIPTVER="1.1.0"
 
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
@@ -13,6 +15,7 @@ REPO_OWNER="slythel2"
 # releases live here, nowhere else. do not repoint at a private repo, wget gets
 # 404 on both the api and the download and the script just gives up
 REPO_NAME="freepbx-arm64-install"
+REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
 FALLBACK_ARTIFACT="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/asterisk-22-current-arm64-debian12.tar.gz"
 
 LOG_FOLDER="/var/log/pbx"
@@ -22,24 +25,31 @@ BACKUP_BASE="/var/backups/asterisk"
 STAGE_DIR="/tmp/asterisk_update_stage"
 
 # --- ARGUMENT PARSING ---
+ORIG_ARGS=("$@")
 DRY_RUN=false
+skipversion=false
 while [[ $# -gt 0 ]]; do
 	case $1 in
 		--dry-run)
 			DRY_RUN=true
 			shift
 			;;
+		--skipversion)
+			skipversion=true
+			shift
+			;;
 		--help|-h)
-			echo "Usage: $0 [--dry-run]"
+			echo "Usage: $0 [--dry-run] [--skipversion]"
 			echo ""
 			echo "Options:"
-			echo "  --dry-run    Check available version without downloading or stopping Asterisk"
-			echo "  --help       Show this help"
+			echo "  --dry-run        Check available version without downloading or stopping Asterisk"
+			echo "  --skipversion    Do not update this script before running it"
+			echo "  --help           Show this help"
 			exit 0
 			;;
 		*)
 			echo "Unknown option: $1"
-			echo "Usage: $0 [--dry-run]"
+			echo "Usage: $0 [--dry-run] [--skipversion]"
 			exit 1
 			;;
 	esac
@@ -98,8 +108,46 @@ touch "${LOG_FILE}"
 
 trap 'rm -rf "$STAGE_DIR" /tmp/asterisk_update.tar.gz 2>/dev/null; exit 130' INT TERM
 
+# ============================================================================
+# SELF-UPDATE
+# ============================================================================
+
+# the installer writes this script once, so without this a fix to the updater
+# would never reach the boxes already installed
+self_update() {
+	if [ "$skipversion" = true ] || [ "$DRY_RUN" = true ]; then
+		return
+	fi
+
+	local latest_script latest_ver self
+	latest_script=$(mktemp)
+	if ! wget -q -T 10 "${REPO_RAW}/update_asterisk.sh" -O "$latest_script"; then
+		warn "Could not check for a newer update_asterisk.sh. Continuing with v${SCRIPTVER}."
+		rm -f "$latest_script"
+		return
+	fi
+
+	latest_ver=$(grep '^SCRIPTVER=' "$latest_script" | head -1 | cut -d'"' -f2)
+	if [ -n "$latest_ver" ] && dpkg --compare-versions "$latest_ver" gt "$SCRIPTVER" && bash -n "$latest_script"; then
+		message "Updating update_asterisk.sh v${SCRIPTVER} -> v${latest_ver}..."
+		self=$(readlink -f "$0")
+		# a rename, not an overwrite: bash is still reading this very file
+		cp "$latest_script" "${self}.new"
+		chmod 755 "${self}.new"
+		mv -f "${self}.new" "$self"
+		rm -f "$latest_script"
+		exec "$self" --skipversion "${ORIG_ARGS[@]}"
+	fi
+
+	rm -f "$latest_script"
+	log "update_asterisk.sh is up to date (v${SCRIPTVER})."
+}
+
+self_update
+
 echo -e "${GREEN}========================================================${NC}"
 echo -e "${GREEN}          ASTERISK 22 UPDATER (with Rollback)           ${NC}"
+echo -e "${GREEN}                    Version: ${SCRIPTVER}                       ${NC}"
 echo -e "${GREEN}========================================================${NC}"
 
 log "Starting Asterisk 22 update..."
