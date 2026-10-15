@@ -281,6 +281,11 @@ system_upgrade() {
 	fi
 }
 
+# major.minor of the installed php, 8.2 (bookworm's) until php is there
+php_version() {
+	php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2"
+}
+
 install_dependencies() {
 	setCurrentStep "Installing required packages"
 
@@ -313,7 +318,7 @@ install_dependencies() {
 	npm install -g pm2 >> "$LOG_FILE" 2>&1 || true
 
 	# fallback: versioned php packages if generic ones didn't create the apache sapi
-	PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
+	PHP_VER=$(php_version)
 	if [ ! -f "/etc/php/${PHP_VER}/apache2/php.ini" ]; then
 		message "PHP ${PHP_VER} apache2 SAPI not found, installing version-specific packages..."
 		apt-get install -y "php${PHP_VER}-cli" "php${PHP_VER}-common" "php${PHP_VER}-curl" \
@@ -332,7 +337,7 @@ configure_php() {
 	setCurrentStep "Configuring PHP settings"
 
 	# detect php version
-	PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
+	PHP_VER=$(php_version)
 	message "Detected PHP version: ${PHP_VER}"
 
 	for INI in /etc/php/${PHP_VER}/apache2/php.ini /etc/php/${PHP_VER}/cli/php.ini; do
@@ -371,7 +376,7 @@ install_ioncube_loader() {
 			PHP_EXT_DIR="/usr/lib/php/20220829"
 		fi
 
-		PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
+		PHP_VER=$(php_version)
 		# ensure php dirs exist
 		mkdir -p "/etc/php/${PHP_VER}/mods-available"
 		mkdir -p "/etc/php/${PHP_VER}/apache2/conf.d"
@@ -602,7 +607,6 @@ APACHEEOF
 	chown -R asterisk:asterisk /var/www/html
 
 	# php session dir
-	PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
 	SESSION_DIR="/var/lib/php/sessions"
 	mkdir -p "$SESSION_DIR"
 	chown asterisk:asterisk "$SESSION_DIR"
