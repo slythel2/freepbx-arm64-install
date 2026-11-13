@@ -8,6 +8,15 @@
 # Stop execution on any error
 set -e
 
+if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    echo "Usage: $0 [ASTERISK_VERSION]"
+    echo ""
+    echo "Arguments:"
+    echo "  ASTERISK_VERSION  Asterisk version to build (default: 22-current)"
+    echo "                    Examples: 22-current, 22.9.0, 21-current"
+    exit 0
+fi
+
 # --- 1. BOOTSTRAP ---
 echo ">>> [BUILDER] Starting NATIVE build process..."
 export DEBIAN_FRONTEND=noninteractive
@@ -40,15 +49,6 @@ apt-get install -y -qq --no-install-recommends \
     python3 python3-dev python-is-python3 procps ca-certificates gnupg
 
 # --- 3. DOWNLOAD ---
-if [[ "$1" == "--help" || "$1" == "-h" ]]; then
-    echo "Usage: $0 [ASTERISK_VERSION]"
-    echo ""
-    echo "Arguments:"
-    echo "  ASTERISK_VERSION  Asterisk version to build (default: 22-current)"
-    echo "                    Examples: 22-current, 22.9.0, 21-current"
-    exit 0
-fi
-
 ASTERISK_VER="$1"
 [ -z "$ASTERISK_VER" ] && ASTERISK_VER="22-current"
 BUILD_DIR="/usr/src/asterisk_build"
@@ -116,7 +116,7 @@ echo ">>> [BUILDER] Configuring..."
 #         → include/asterisk/version.h (generated after configure)
 #         → config.log PACKAGE_VERSION (may only contain major version)
 if [ -f ".version" ]; then
-    REAL_VERSION=$(cat .version | tr -d '[:space:]')
+    REAL_VERSION=$(tr -d '[:space:]' < .version)
     echo ">>> [BUILDER] Version from .version file: $REAL_VERSION"
 elif [ -f "include/asterisk/version.h" ]; then
     REAL_VERSION=$(grep 'ASTERISK_VERSION' include/asterisk/version.h | grep -oP '"[^"]*"' | tr -d '"' | head -n1)
@@ -212,7 +212,10 @@ if [ -f /tmp/asterisk_version.txt ]; then
 fi
 
 cd $BUILD_DIR/staging
-TAR_NAME="asterisk-${ASTERISK_VER}-arm64-debian12.tar.gz"
+# named after the major only (22.9.0 -> 22-current): the fallback url in the
+# installer and the updater asks for this exact name from the latest release.
+# the real version is in VERSION.txt
+TAR_NAME="asterisk-${ASTERISK_VER%%[.-]*}-current-arm64-debian12.tar.gz"
 echo ">>> [BUILDER] Creating archive at $OUTPUT_DIR/$TAR_NAME..."
 tar -czvf "$OUTPUT_DIR/$TAR_NAME" .
 
