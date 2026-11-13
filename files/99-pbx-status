@@ -46,7 +46,8 @@ fi
 RAM_STR="${RAM_COLOR}${RAM_PERCENT_DEC}%${NC} (${RAM_USED_H}/${RAM_TOTAL_H})"
 
 # Asterisk Version (if running)
-AST_VERSION=$(asterisk -rx "core show version" 2>/dev/null | head -n1 | awk '{print $2}' || echo "N/A")
+AST_VERSION=$(asterisk -rx "core show version" 2>/dev/null | head -n1 | awk '{print $2}')
+[ -n "$AST_VERSION" ] || AST_VERSION="N/A"
 
 # Service Status Check
 check_service() {
@@ -69,12 +70,50 @@ fi
 # Banned Public IPs Check
 PUBLIC_BANNED_COUNT=$(fail2ban-client banned 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -vE '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)' | sort -u | grep -c . || true)
 
+# Certificate, read from the ssl vhost so it follows whatever setup_https did
+CERT_STR=""
+WEB_SCHEME="http"
+WEB_HOST="$IP_ADDR"
+SSL_VHOST=/etc/apache2/sites-available/freepbx-ssl.conf
+if ss -lnt 2>/dev/null | grep -q ':443 '; then
+    WEB_SCHEME="https"
+    # read, do not source: HOSTNAME is a bash builtin and sourcing pollutes the shell
+    WEB_FQDN=$(awk -F= '/^FQDN=/{print $2}' /etc/freepbx-https.conf 2>/dev/null)
+    [ -n "$WEB_FQDN" ] && WEB_HOST="$WEB_FQDN"
+    CERT_FILE=$(awk '/^[[:space:]]*SSLCertificateFile/ {print $2}' "$SSL_VHOST" 2>/dev/null | head -1)
+    if [ -n "$CERT_FILE" ] && [ -r "$CERT_FILE" ]; then
+        case "$CERT_FILE" in
+            /etc/letsencrypt/*)
+                CERT_END=$(openssl x509 -enddate -noout -in "$CERT_FILE" 2>/dev/null | cut -d= -f2)
+                # date -d "" happily returns midnight today, so check the string
+                # first: a non root login cannot read /etc/letsencrypt/live
+                CERT_EPOCH=""
+                [ -n "$CERT_END" ] && CERT_EPOCH=$(date -d "$CERT_END" +%s 2>/dev/null || echo "")
+                if [ -n "$CERT_EPOCH" ]; then
+                    CERT_DAYS=$(( (CERT_EPOCH - $(date +%s)) / 86400 ))
+                    CERT_WHEN=$(date -d "$CERT_END" '+%d/%m/%Y' 2>/dev/null)
+                    if   [ "$CERT_DAYS" -lt 0 ];  then CERT_STR="${RED}EXPIRED on ${CERT_WHEN}${NC}"
+                    elif [ "$CERT_DAYS" -lt 7 ];  then CERT_STR="${RED}${CERT_WHEN}, ${CERT_DAYS} days left, renewal is failing${NC}"
+                    elif [ "$CERT_DAYS" -lt 21 ]; then CERT_STR="${ORANGE}${CERT_WHEN}, ${CERT_DAYS} days left${NC}"
+                    else CERT_STR="${GREEN}${CERT_WHEN}, ${CERT_DAYS} days left${NC}"
+                    fi
+                    # a staging cert counts down like a real one but no browser trusts it
+                    case "$(openssl x509 -noout -issuer -in "$CERT_FILE" 2>/dev/null)" in
+                        *STAGING*) CERT_STR="${ORANGE}STAGING, browsers will warn${NC} (${CERT_WHEN})" ;;
+                    esac
+                fi
+                ;;
+            *) CERT_STR="${ORANGE}self signed, browsers will warn${NC}" ;;
+        esac
+    fi
+fi
+
 # Display Banner
 echo -e "${BLUE}=========================================================${NC}"
 echo -e "${BLUE}                   FREEPBX 17 ARM64 ${NC}"
 echo -e "${BLUE}=========================================================${NC}"
 echo -e ""
-echo -e " ${YELLOW}Web Interface:${NC}  http://$IP_ADDR/admin"
+echo -e " ${YELLOW}Web Interface:${NC}  ${WEB_SCHEME}://${WEB_HOST}/admin"
 echo -e " ${YELLOW}Uptime:${NC}         $UPTIME"
 echo -e " ${YELLOW}Disk / RAM:${NC}     $DISK_STR - $RAM_STR"
 echo -e " ${YELLOW}Asterisk:${NC}       $AST_VERSION"
@@ -86,6 +125,7 @@ echo -e "   Apache Web:       $APACHE_STATUS"
 echo -e "   Fail2ban SEC:     $FAIL2BAN_STATUS"
 echo -e "   Banned Local IPs: $BANNED_STR"
 echo -e "   Banned Public IPs: $PUBLIC_BANNED_COUNT"
+[ -n "$CERT_STR" ] && echo -e "   Certificate:      $CERT_STR"
 echo -e ""
 echo -e " ${YELLOW}Remember to run update_asterisk.sh to update your Asterisk 22 version!${NC}"
 echo -e "${BLUE}=========================================================${NC}"

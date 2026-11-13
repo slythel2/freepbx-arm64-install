@@ -1,12 +1,43 @@
 [Unit]
 Description=Asterisk PBX
 After=network.target mariadb.service
+Wants=mariadb.service
+
+# these two belong here, systemd ignores StartLimitIntervalSec in [Service]
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
 [Service]
 Type=simple
 User=asterisk
 Group=asterisk
-ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf
-Restart=always
+# -vvv as safe_asterisk passes it, or the full log gets no call flow
+ExecStart=/usr/sbin/asterisk -f -vvv -C /etc/asterisk/asterisk.conf
+# the console is a colored copy of the full log, asterisk's own unit drops it too
+StandardOutput=null
+StandardError=journal
+# somewhere asterisk can write a core
+WorkingDirectory=/var/lib/asterisk
+# dash because fwconsole may have stopped asterisk already
+ExecStop=-/usr/sbin/asterisk -rx "core stop gracefully"
+ExecReload=/usr/sbin/asterisk -rx "core reload"
+# on-failure, not always, or fwconsole stop cannot make it stay stopped
+Restart=on-failure
 RestartSec=5
+TimeoutStopSec=30
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=8192
+LimitCORE=infinity
+
+# Security hardening
+ProtectSystem=full
+# app_voicemail rewrites voicemail.conf when a pin is changed from the phone
+ReadWritePaths=-/etc/asterisk
+ProtectHome=true
+# no NoNewPrivileges, it ignores the setgid on postdrop and voicemail mail never queues
+PrivateTmp=true
+
 [Install]
 WantedBy=multi-user.target

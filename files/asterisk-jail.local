@@ -1,11 +1,13 @@
 # FreePBX Fail2ban Configuration with GENEROUS limits
 # Protects against brute force while avoiding false positives from legitimate phones
+# stock asterisk filter, it bans the packet source and not the From header the caller writes
+# banaction comes from jail.d/00-banaction.local, nftables
 
 [asterisk-pjsip]
 enabled = true
 port = 5060,5061
 protocol = udp,tcp
-filter = asterisk-pjsip
+filter = asterisk
 logpath = /var/log/asterisk/full
           /var/log/asterisk/messages
 
@@ -15,14 +17,11 @@ maxretry = 20
 findtime = 600
 bantime = 3600
 
-# Use iptables-multiport for better performance
-banaction = iptables-multiport
-
 [asterisk-pjsip-ddos]
 enabled = true
 port = 5060,5061
 protocol = udp,tcp
-filter = asterisk-pjsip
+filter = asterisk
 logpath = /var/log/asterisk/full
           /var/log/asterisk/messages
 
@@ -31,5 +30,3 @@ logpath = /var/log/asterisk/full
 maxretry = 40
 findtime = 60
 bantime = 7200
-
-banaction = iptables-multiport

@@ -1,0 +1,27 @@
+# asterisk reopens these on logger reload
+/var/log/asterisk/full /var/log/asterisk/messages /var/log/asterisk/security /var/log/asterisk/queue_log {
+	su asterisk asterisk
+	daily
+	rotate 7
+	missingok
+	notifempty
+	compress
+	delaycompress
+	create 0640 asterisk asterisk
+	sharedscripts
+	postrotate
+		/usr/sbin/asterisk -rx 'logger reload' > /dev/null 2>&1 || true
+	endscript
+}
+
+# freepbx, pm2 and module logs, pm2 keeps its files open so truncate in place
+/var/log/asterisk/*.log {
+	su asterisk asterisk
+	daily
+	rotate 7
+	missingok
+	notifempty
+	compress
+	delaycompress
+	copytruncate
+}

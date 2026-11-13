@@ -57,8 +57,9 @@ mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
 echo ">>> [BUILDER] Downloading Asterisk $ASTERISK_VER..."
-ASTERISK_BASE_URL="https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-${ASTERISK_VER}.tar.gz"
-wget -qO asterisk.tar.gz "${ASTERISK_BASE_URL}"
+ASTERISK_BASE_URL="https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-${ASTERISK_VER}"
+wget -qO asterisk.tar.gz "${ASTERISK_BASE_URL}.tar.gz"
+# upstream publishes asterisk-VER.sha256, there is no .tar.gz.sha256
 if wget -qO asterisk.tar.gz.sha256 "${ASTERISK_BASE_URL}.sha256" 2>/dev/null; then
     echo ">>> [BUILDER] Verifying Asterisk tarball SHA256..."
     EXPECTED_SHA=$(awk '{print $1}' asterisk.tar.gz.sha256)
@@ -142,7 +143,7 @@ if [ -f "$PJCFG" ]; then
 /* PJ_DECL_COMPAT_FWD: Forward-declare pjproject macros for GCC 12+.
  * Prevents cascading errors when config_site.h includes system headers
  * before these macros are defined later in config.h.
- * Identical to upstream defaults — safe even after upstream fixes this. */
+ * Identical to upstream defaults, safe even after upstream fixes this. */
 #ifndef PJ_DECL
 #define PJ_DECL(type)       extern type
 #endif
@@ -193,7 +194,8 @@ fi
 unset _avail_kb
 
 echo ">>> [BUILDER] Compiling (Native Speed)..."
-make -j"$(nproc)"
+# noisy, or a failure inside the bundled pjproject shows no compiler output
+make -j"$(nproc)" NOISY_BUILD=yes
 
 # --- 7. INSTALL & PACKAGE ---
 echo ">>> [BUILDER] Packaging..."
@@ -210,6 +212,9 @@ make config DESTDIR=$BUILD_DIR/staging
 if [ -f /tmp/asterisk_version.txt ]; then
     cp /tmp/asterisk_version.txt $BUILD_DIR/staging/VERSION.txt
 fi
+
+# /var/run is a link to /run on the target, an entry for it turns it into a directory
+rm -rf "$BUILD_DIR/staging/var/run"
 
 cd $BUILD_DIR/staging
 # named after the major only (22.9.0 -> 22-current): the fallback url in the

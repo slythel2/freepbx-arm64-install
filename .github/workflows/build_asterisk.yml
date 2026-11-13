@@ -8,7 +8,7 @@ on:
         required: true
         default: '22-current'
   schedule:
-    # Runs roughly every 2 weeks (1st and 15th of the month)
+    # 1st and 15th, asterisk patch releases land about monthly
     - cron: '0 0 1,15 * *'
 
 permissions:
@@ -87,6 +87,14 @@ jobs:
             fi
           fi
 
+          # build 21 got a tag with a line of C in it, which breaks git fetch --tags
+          ASTERISK_VERSION=$(printf '%s' "$ASTERISK_VERSION" | tr -cd 'A-Za-z0-9._-')
+          if [ -z "$ASTERISK_VERSION" ]; then
+            ASTERISK_VERSION="22-current"
+            echo ">>> WARNING: version string was unusable, falling back to $ASTERISK_VERSION"
+          fi
+          echo ">>> Using version: $ASTERISK_VERSION"
+
           echo "version=$ASTERISK_VERSION" >> $GITHUB_OUTPUT
           echo "tarball=$TARBALL" >> $GITHUB_OUTPUT
           BUILD_DATE=$(date +"%Y-%m-%d")
@@ -101,11 +109,11 @@ jobs:
           body: |
             ## Asterisk 22 LTS - ARM64 Debian 12 (Bookworm)
 
-            **Version:** `${{ steps.version.outputs.version }}`  
-            **Architecture:** ARM64 (aarch64)  
-            **Target OS:** Debian 12 Bookworm  
-            **Build Date:** ${{ steps.version.outputs.build_date }}  
-            **Build Number:** #${{ github.run_number }}
+            - **Version:** `${{ steps.version.outputs.version }}`
+            - **Architecture:** ARM64 (aarch64)
+            - **Target OS:** Debian 12 Bookworm
+            - **Build Date:** ${{ steps.version.outputs.build_date }}
+            - **Build Number:** #${{ github.run_number }}
 
             ###  Artifact
 

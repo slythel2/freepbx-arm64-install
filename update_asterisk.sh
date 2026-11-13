@@ -6,8 +6,8 @@
 # ============================================================================
 
 set -e
-# bump on every change, it is how installed copies find out they are outdated
-SCRIPTVER="1.1.0"
+# bump on every change, it is how an installed copy finds out it is outdated
+SCRIPTVER="1.2.1"
 
 # --- CONFIGURATION ---
 REPO_OWNER="slythel2"
@@ -25,7 +25,6 @@ BACKUP_BASE="/var/backups/asterisk"
 STAGE_DIR="/tmp/asterisk_update_stage"
 
 # --- ARGUMENT PARSING ---
-ORIG_ARGS=("$@")
 DRY_RUN=false
 skipversion=false
 while [[ $# -gt 0 ]]; do
@@ -43,7 +42,7 @@ while [[ $# -gt 0 ]]; do
 			echo ""
 			echo "Options:"
 			echo "  --dry-run        Check available version without downloading or stopping Asterisk"
-			echo "  --skipversion    Do not update this script before running it"
+			echo "  --skipversion    Skip the check for a newer version of this script"
 			echo "  --help           Show this help"
 			exit 0
 			;;
@@ -106,51 +105,69 @@ fi
 mkdir -p "${LOG_FOLDER}"
 touch "${LOG_FILE}"
 
+# nothing is deployed yet here, so cleaning up and leaving is enough. it has to exit though
 trap 'rm -rf "$STAGE_DIR" /tmp/asterisk_update.tar.gz 2>/dev/null; exit 130' INT TERM
-
-# ============================================================================
-# SELF-UPDATE
-# ============================================================================
-
-# the installer writes this script once, so without this a fix to the updater
-# would never reach the boxes already installed
-self_update() {
-	if [ "$skipversion" = true ] || [ "$DRY_RUN" = true ]; then
-		return
-	fi
-
-	local latest_script latest_ver self
-	latest_script=$(mktemp)
-	if ! wget -q -T 10 "${REPO_RAW}/update_asterisk.sh" -O "$latest_script"; then
-		warn "Could not check for a newer update_asterisk.sh. Continuing with v${SCRIPTVER}."
-		rm -f "$latest_script"
-		return
-	fi
-
-	latest_ver=$(grep '^SCRIPTVER=' "$latest_script" | head -1 | cut -d'"' -f2)
-	if [ -n "$latest_ver" ] && dpkg --compare-versions "$latest_ver" gt "$SCRIPTVER" && bash -n "$latest_script"; then
-		message "Updating update_asterisk.sh v${SCRIPTVER} -> v${latest_ver}..."
-		self=$(readlink -f "$0")
-		# a rename, not an overwrite: bash is still reading this very file
-		cp "$latest_script" "${self}.new"
-		chmod 755 "${self}.new"
-		mv -f "${self}.new" "$self"
-		rm -f "$latest_script"
-		exec "$self" --skipversion "${ORIG_ARGS[@]}"
-	fi
-
-	rm -f "$latest_script"
-	log "update_asterisk.sh is up to date (v${SCRIPTVER})."
-}
-
-self_update
+# a refused artifact left 300MB in /tmp until the next run
+trap 'rm -rf "$STAGE_DIR" /tmp/asterisk_update.tar.gz 2>/dev/null' EXIT
 
 echo -e "${GREEN}========================================================${NC}"
 echo -e "${GREEN}          ASTERISK 22 UPDATER (with Rollback)           ${NC}"
-echo -e "${GREEN}                    Version: ${SCRIPTVER}                       ${NC}"
+echo -e "${GREEN}                   Version: ${SCRIPTVER}                    ${NC}"
 echo -e "${GREEN}========================================================${NC}"
 
-log "Starting Asterisk 22 update..."
+log "Starting Asterisk 22 update v${SCRIPTVER}..."
+
+# ============================================================================
+# SELF-VERSION CHECK
+# ============================================================================
+
+# the installer writes this script once, so a fix to it never reaches a box that
+# is already installed. this only says so, it never replaces anything by itself:
+# downloading and running a root script on every update is not worth the risk
+check_script_version() {
+	if [ "$skipversion" = true ]; then
+		log "Skipping the version check (--skipversion)."
+		return
+	fi
+	# nothing to compare against when running from a working copy
+	local dir
+	dir=$(cd "$(dirname "$(readlink -f "$0")")" && pwd 2>/dev/null) || return
+	if [ -d "${dir}/.git" ]; then
+		log "Running from a git working copy, skipping the version check."
+		return
+	fi
+
+	local remote latest
+	remote=$(mktemp) || return
+	if ! wget -q -T 10 -O "$remote" "${REPO_RAW}/update_asterisk.sh" 2>/dev/null; then
+		log "Could not check for a newer updater, continuing with v${SCRIPTVER}."
+		rm -f "$remote"
+		return
+	fi
+	latest=$(grep -m1 '^SCRIPTVER=' "$remote" | cut -d'"' -f2)
+	rm -f "$remote"
+
+	if [ -z "$latest" ]; then
+		log "Could not read the published version, continuing with v${SCRIPTVER}."
+		return
+	fi
+	if dpkg --compare-versions "$latest" gt "$SCRIPTVER" 2>/dev/null; then
+		# piped through bash, $0 is just bash
+		local target
+		target=$(readlink -f "$0" 2>/dev/null)
+		[ -f "$target" ] && [ "${target##*/}" = update_asterisk.sh ] || target=/usr/local/bin/update_asterisk.sh
+		echo ""
+		echo -e "${YELLOW}A newer updater is available: v${latest}, this one is v${SCRIPTVER}.${NC}"
+		echo -e "${YELLOW}It is not replaced automatically. To take it:${NC}"
+		echo -e "${YELLOW}  wget -O ${target} ${REPO_RAW}/update_asterisk.sh && chmod +x ${target}${NC}"
+		echo ""
+		log "A newer updater is published: v${latest} against v${SCRIPTVER}."
+	else
+		log "The updater is up to date (v${SCRIPTVER})."
+	fi
+}
+
+check_script_version
 
 # ============================================================================
 # VERSION CHECK
@@ -172,7 +189,8 @@ fi
 message "Current installed version: ${CURRENT_VERSION}"
 
 # Fetch latest release info
-RELEASE_JSON=$(curl -s --max-time 30 "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest")
+# a curl that fails must still reach the fallback url below
+RELEASE_JSON=$(curl -s --max-time 30 "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest") || RELEASE_JSON=""
 LATEST_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select((.name | contains("asterisk")) and (.name | endswith(".tar.gz"))) | .browser_download_url' | head -n 1)
 SHA_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select((.name | contains("asterisk")) and (.name | endswith(".sha256"))) | .browser_download_url' | head -n 1)
 RELEASE_TAG=$(echo "$RELEASE_JSON" | jq -r '.tag_name // empty')
@@ -251,6 +269,11 @@ for lib in /usr/lib/libasterisk*.so*; do
 	[ -f "$lib" ] && cp "$lib" "$BACKUP_DIR/libs/" 2>/dev/null || true
 done
 
+# xml docs, they go with the modules
+if [ -d /var/lib/asterisk/documentation ]; then
+	cp -r /var/lib/asterisk/documentation "$BACKUP_DIR/" 2>/dev/null || true
+fi
+
 # Configuration (safety net, not overwritten by deploy, but saved just in case)
 if [ -d /etc/asterisk ]; then
 	mkdir -p "$BACKUP_DIR/config"
@@ -326,16 +349,20 @@ if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
 fi
 
 # ============================================================================
-# STAGE (before the stop, a broken tarball must not cost any downtime)
+# STAGE, before the stop: a tarball that only breaks here must cost no downtime
 # ============================================================================
 
-tar -xzf /tmp/asterisk_update.tar.gz -C "$STAGE_DIR" || error "Failed to extract the update. Asterisk was NOT stopped."
+tar -xzf /tmp/asterisk_update.tar.gz -C "$STAGE_DIR" \
+	|| error "Failed to extract the update. Asterisk was NOT stopped."
 
-# Extract confirmed version from tarball's VERSION.txt
+if [ ! -f "$STAGE_DIR/usr/sbin/asterisk" ]; then
+	error "The artifact has no usr/sbin/asterisk. Asterisk was NOT stopped."
+fi
+
+# the tarball knows its own version better than the release tag
 if [ -f "$STAGE_DIR/VERSION.txt" ]; then
 	TARBALL_VERSION=$(tr -d '[:space:]' < "$STAGE_DIR/VERSION.txt")
 	message "Tarball contains Asterisk version: $TARBALL_VERSION"
-	# Update AVAILABLE_VERSION if we got a better answer from the tarball
 	if echo "$TARBALL_VERSION" | grep -qP '^[0-9]+\.[0-9]+\.[0-9]+'; then
 		AVAILABLE_VERSION="$TARBALL_VERSION"
 	fi
@@ -352,56 +379,76 @@ start_freepbx() {
 		|| warn "freepbx.service did not start, UCP and FastAGI are down. Run: systemctl start freepbx"
 }
 
+# asterisk keeps a second copy of the xml docs for its http server
+copy_static_docs() {
+	if [ -f /var/lib/asterisk/documentation/core-en_US.xml ] && [ -d /var/lib/asterisk/static-http ]; then
+		cp -f /var/lib/asterisk/documentation/core-en_US.xml /var/lib/asterisk/static-http/
+	fi
+}
+
 # puts the backed up build back and starts it again. never returns
 rollback() {
-	systemctl stop asterisk >> "$LOG_FILE" 2>&1 || true
+	# reached from the trap and from the health check, it must not die halfway on either path
+	trap '' INT TERM HUP
+	set +e
+	systemctl stop asterisk >> "$LOG_FILE" 2>&1
 	# -x, or the pattern matches this script (update_asterisk) and kills the rollback
-	pkill -9 -x asterisk 2>/dev/null || true
+	pkill -9 -x asterisk 2>/dev/null
 
-	# Restore binary
 	if [ -f "$BACKUP_DIR/asterisk" ]; then
 		cp -f "$BACKUP_DIR/asterisk" /usr/sbin/asterisk
 		chown asterisk:asterisk /usr/sbin/asterisk
 		chmod +x /usr/sbin/asterisk
 	fi
 
-	# Restore modules, but never from an empty backup: that would wipe them all
-	if [ -d "$BACKUP_DIR/modules" ] && ls "$BACKUP_DIR/modules"/* &>/dev/null; then
+	# never restore from an empty backup, that would wipe every module instead
+	if [ -d "$BACKUP_DIR/modules" ] && [ -n "$(ls -A "$BACKUP_DIR/modules" 2>/dev/null)" ]; then
 		rm -rf /usr/lib/asterisk/modules/*
 		cp -r "$BACKUP_DIR/modules"/* /usr/lib/asterisk/modules/
 		chown -R asterisk:asterisk /usr/lib/asterisk/modules
+	else
+		warn "The backup holds no modules, leaving /usr/lib/asterisk/modules as it is."
+		warn "The old binary may now sit next to the new modules, check: asterisk -rx 'module show'"
 	fi
 
-	# Restore shared libraries
-	if [ -d "$BACKUP_DIR/libs" ] && ls "$BACKUP_DIR/libs"/*.so* &>/dev/null; then
+	if [ -d "$BACKUP_DIR/libs" ] && ls "$BACKUP_DIR/libs"/*.so* > /dev/null 2>&1; then
 		cp -f "$BACKUP_DIR/libs"/*.so* /usr/lib/
+	fi
+
+	if [ -d "$BACKUP_DIR/documentation" ]; then
+		cp -rf "$BACKUP_DIR/documentation"/. /var/lib/asterisk/documentation/
+		copy_static_docs
 	fi
 
 	rm -rf "$STAGE_DIR" /tmp/asterisk_update.tar.gz
 	ldconfig
 	# the crashing build may have used up the unit's start limit
-	systemctl reset-failed asterisk > /dev/null 2>&1 || true
-	systemctl start asterisk >> "$LOG_FILE" 2>&1 || true
+	systemctl reset-failed asterisk > /dev/null 2>&1
+	systemctl start asterisk >> "$LOG_FILE" 2>&1
 	sleep 5
 	start_freepbx
 
 	# Keep backup for diagnostics, do NOT delete
 	echo -e "${YELLOW}Backup preserved at $BACKUP_DIR for diagnostics.${NC}"
-	if asterisk -rx "core show version" &>/dev/null; then
+	if asterisk -rx "core show version" > /dev/null 2>&1; then
 		error "Rollback complete. Previous version restored and running. Check: journalctl -xeu asterisk"
 	fi
 	error "Rollback done but Asterisk did not come back. Check: journalctl -xeu asterisk"
 }
 
-# asterisk is down from the stop below until the health check passes. a failed
-# command or a ctrl-c in between must bring the old build back, not exit with no pbx
+# asterisk is down from the stop below until the health check passes. a failed command,
+# a ctrl-c or a dropped ssh session in between must bring the old build back, not exit with no pbx
 deploy_failed() {
+	# ignore, not default: a second ctrl-c must not kill the rollback halfway
+	trap '' ERR INT TERM HUP
 	set +e
-	trap - ERR INT TERM
-	echo -e "${RED}[ERROR] Update interrupted at line $1. Rolling back...${NC}" | tee -a "$LOG_FILE"
+	echo -e "${RED}[ERROR] Update interrupted${1:+ at line $1}. Rolling back...${NC}" | tee -a "$LOG_FILE"
 	rollback
 }
-trap 'deploy_failed "$LINENO"' ERR INT TERM
+# errtrace, or a failure inside message, warn or any other function never reaches the trap
+set -E
+trap 'deploy_failed "$LINENO"' ERR
+trap 'deploy_failed' INT TERM HUP
 
 # ============================================================================
 # GRACEFUL STOP
@@ -439,18 +486,30 @@ fi
 
 message "Deploying updated binaries, modules, and libraries..."
 
-# binary, modules and libraries only, the tarball's sample configs must not reach /etc/asterisk
+# binary, modules, libraries and xml docs only, the tarball's sample configs must not reach /etc/asterisk
 
+# if blocks, not && lists: with the ERR trap armed a false test must not look like a failure
 # Binary
-[ -f "$STAGE_DIR/usr/sbin/asterisk" ] && cp -f "$STAGE_DIR/usr/sbin/asterisk" /usr/sbin/
+if [ -f "$STAGE_DIR/usr/sbin/asterisk" ]; then
+	cp -f "$STAGE_DIR/usr/sbin/asterisk" /usr/sbin/
+fi
 
 # Modules
-[ -d "$STAGE_DIR/usr/lib/asterisk/modules" ] && cp -rf "$STAGE_DIR/usr/lib/asterisk/modules"/* /usr/lib/asterisk/modules/
+if [ -d "$STAGE_DIR/usr/lib/asterisk/modules" ]; then
+	cp -rf "$STAGE_DIR/usr/lib/asterisk/modules"/* /usr/lib/asterisk/modules/
+fi
 
 # Shared libraries (critical for ABI compatibility with new modules)
 for lib in "$STAGE_DIR"/usr/lib/libasterisk*.so*; do
 	[ -f "$lib" ] && cp -f "$lib" /usr/lib/
 done
+
+# xml docs, without them every option the old file lacks is an error at each start
+if [ -d "$STAGE_DIR/var/lib/asterisk/documentation" ]; then
+	mkdir -p /var/lib/asterisk/documentation
+	cp -rf "$STAGE_DIR/var/lib/asterisk/documentation"/. /var/lib/asterisk/documentation/
+	copy_static_docs
+fi
 
 # Restoring permissions
 log "Restoring correct permissions..."
@@ -486,7 +545,14 @@ for i in {1..10}; do
 	sleep 2
 done
 
-trap - ERR INT TERM
+# ============================================================================
+# ROLLBACK (if health check failed)
+# ============================================================================
+
+# past this point a later failure must not roll back. the rollback below ignores signals by itself
+trap - ERR INT TERM HUP
+set +E
+
 if [ $ASTERISK_HEALTHY -eq 0 ]; then
 	echo -e "${RED}[ERROR] Asterisk failed to start after update. Rolling back...${NC}" | tee -a "$LOG_FILE"
 	rollback
@@ -500,7 +566,8 @@ start_freepbx
 
 message "Running FreePBX reload..."
 if command -v fwconsole &> /dev/null; then
-	fwconsole reload >> "$LOG_FILE" 2>&1 || warn "FreePBX reload had warnings"
+	# reload leaves a signature check running in the background, it must not keep our lock
+	fwconsole reload 200>&- >> "$LOG_FILE" 2>&1 || warn "FreePBX reload had warnings"
 fi
 
 # Clean up old backups (keeps last 3)

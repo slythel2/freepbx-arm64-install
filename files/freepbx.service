@@ -1,8 +1,10 @@
 [Unit]
 Description=FreePBX VoIP Server
 After=asterisk.service mariadb.service network-online.target
-Wants=network-online.target
-Requires=asterisk.service mariadb.service
+# wants, not requires, for mariadb: a restart of the database used to stop this unit and
+# asterisk with it, and fwconsole then brought asterisk back outside asterisk.service
+Wants=network-online.target mariadb.service
+Requires=asterisk.service
 
 [Service]
 Type=oneshot
