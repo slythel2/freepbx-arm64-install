@@ -116,4 +116,4 @@ This project is not affiliated with or endorsed by Sangoma.
 
 ---
 
-**Credits:** FreePBX & Asterisk open-source projects.
+**Credits:** FreePBX, Asterisk open-source projects, [chrsmj](https://github.com/chrsmj) from Sangoma, which his flawless installation script inspired me to tinker with FreePBX in the first place. **Thank you** Chris.
